@@ -31,9 +31,10 @@ final class BackupCoordinator: ObservableObject {
             jobs.append(DropboxJob(remoteName: settings.dropboxRemoteName,
                                    volumePath: settings.dropboxVolumePath))
         }
-        if CCCJob.isInstalled() {
-            jobs.append(CCCJob(jobType: .bootable, taskName: settings.bootableCCCTaskName))
-        }
+        // Bootable clone task disabled until a real CCC bootable task is configured
+        // if CCCJob.isInstalled() {
+        //     jobs.append(CCCJob(jobType: .bootable, taskName: settings.bootableCCCTaskName))
+        // }
         return jobs
     }
 
@@ -75,12 +76,20 @@ final class BackupCoordinator: ObservableObject {
             currentJobType = job.jobType
             let jobStart = Date()
 
+            // Forward live progress into coordinator's published property
+            let progressTask = Task { [weak self] in
+                for await p in job.progress.values {
+                    self?.currentProgress = p
+                }
+            }
+
             do {
                 try await job.start()
             } catch {
-                // CancellationError or other — mark as failed
+                print("[BackupCoordinator] \(job.jobType) failed: \(error)")
             }
 
+            progressTask.cancel()
             let fp = job.progress.value
             let duration = Int(Date().timeIntervalSince(jobStart))
             var result = JobResult(runId: runId,

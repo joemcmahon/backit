@@ -1,6 +1,29 @@
 import Foundation
 import Combine
 
+private func freePort() -> Int {
+    let sock = socket(AF_INET, SOCK_STREAM, 0)
+    guard sock >= 0 else { return 5572 }
+    defer { close(sock) }
+    var addr = sockaddr_in()
+    addr.sin_family = sa_family_t(AF_INET)
+    addr.sin_port = 0
+    addr.sin_addr.s_addr = INADDR_LOOPBACK
+    let bound = withUnsafeMutablePointer(to: &addr) {
+        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+            bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+        }
+    }
+    guard bound == 0 else { return 5572 }
+    var len = socklen_t(MemoryLayout<sockaddr_in>.size)
+    withUnsafeMutablePointer(to: &addr) {
+        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+            getsockname(sock, $0, &len)
+        }
+    }
+    return Int(addr.sin_port.bigEndian)
+}
+
 final class DropboxJob: BackupJob {
     let jobType: JobType = .dropbox
     let progress: CurrentValueSubject<JobProgress, Never>
@@ -12,11 +35,13 @@ final class DropboxJob: BackupJob {
     private var pollTask: Task<Void, Never>?
 
     static func isInstalled() -> Bool {
-        ["/usr/local/bin/rclone", "/opt/homebrew/bin/rclone"]
-            .contains { FileManager.default.fileExists(atPath: $0) }
+        ["/usr/local/bin/rclone", "/opt/homebrew/bin/rclone"].contains {
+            let resolved = URL(fileURLWithPath: $0).resolvingSymlinksInPath().path
+            return FileManager.default.fileExists(atPath: resolved)
+        }
     }
 
-    init(remoteName: String, volumePath: String, rcPort: Int = 5572) {
+    init(remoteName: String, volumePath: String, rcPort: Int = freePort()) {
         self.remoteName = remoteName
         self.volumePath = volumePath
         self.rcPort = rcPort
@@ -24,25 +49,38 @@ final class DropboxJob: BackupJob {
     }
 
     func start() async throws {
+        killOrphanedRclones()
+
         progress.send(JobProgress(fraction: 0, bytesTransferred: 0,
                                   bytesTotal: 0, transferRate: "", status: .running))
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: rclonePath())
         proc.arguments = [
-            "sync", "\(remoteName):", volumePath,
+            "sync", "\(remoteName):", volumePath.trimmingCharacters(in: .whitespaces),
             "--metadata",
             "--tpslimit", "12", "--tpslimit-burst", "0",
             "-L",
             "--transfers", "8", "--checkers", "8",
             "--rc", "--rc-addr", "localhost:\(rcPort)"
         ]
+        print("[DropboxJob] launching: \(rclonePath()) \(proc.arguments?.joined(separator: " ") ?? "")")
         self.process = proc
         try proc.run()
 
         pollTask = Task { await pollStats() }
-        proc.waitUntilExit()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .utility).async {
+                    proc.waitUntilExit()
+                    continuation.resume()
+                }
+            }
+        } onCancel: {
+            proc.terminate()
+        }
         pollTask?.cancel()
+        self.process = nil
 
         let jobStatus: JobStatus = proc.terminationStatus == 0 ? .done : .failed
         progress.send(JobProgress(
@@ -52,9 +90,19 @@ final class DropboxJob: BackupJob {
             transferRate: "", status: jobStatus))
     }
 
+    private func killOrphanedRclones() {
+        let killer = Process()
+        killer.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        killer.arguments = ["-f", "rclone sync"]
+        try? killer.run()
+        // Don't waitUntilExit — fire-and-forget is fine for pkill
+    }
+
     func cancel() {
         pollTask?.cancel()
         process?.terminate()
+        process?.waitUntilExit()
+        process = nil
         progress.send(JobProgress(
             fraction: progress.value.fraction,
             bytesTransferred: progress.value.bytesTransferred,
@@ -80,8 +128,13 @@ final class DropboxJob: BackupJob {
     }
 
     private func rclonePath() -> String {
-        ["/usr/local/bin/rclone", "/opt/homebrew/bin/rclone"]
-            .first { FileManager.default.fileExists(atPath: $0) }
-            ?? "/usr/local/bin/rclone"
+        let candidates = ["/usr/local/bin/rclone", "/opt/homebrew/bin/rclone"]
+        for path in candidates {
+            let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+            if FileManager.default.fileExists(atPath: resolved) {
+                return resolved
+            }
+        }
+        return "/usr/local/bin/rclone"
     }
 }

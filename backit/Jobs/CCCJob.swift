@@ -1,21 +1,56 @@
 import Foundation
 import Combine
 
-// Injectable protocol so tests never invoke real AppleScript
-protocol AppleScriptRunner: AnyObject {
-    func run(script: String) throws -> String
+// Injectable protocol so tests never invoke the real CCC CLI
+protocol CCCCLIRunner: AnyObject {
+    func runTask(named name: String, progressHandler: @escaping (Double) -> Void) async throws -> Int32
+    func stopTask(named name: String)
 }
 
-final class DefaultAppleScriptRunner: AppleScriptRunner {
-    func run(script: String) throws -> String {
-        var errorDict: NSDictionary?
-        guard let appleScript = NSAppleScript(source: script) else { return "" }
-        let result = appleScript.executeAndReturnError(&errorDict)
-        if let err = errorDict {
-            throw NSError(domain: "AppleScript", code: -1,
-                          userInfo: err as? [String: Any])
+final class DefaultCCCCLIRunner: CCCCLIRunner {
+    static let cliPath = "/Applications/Carbon Copy Cloner.app/Contents/MacOS/ccc"
+
+    func runTask(named name: String, progressHandler: @escaping (Double) -> Void) async throws -> Int32 {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: Self.cliPath)
+        proc.arguments = ["--start=\(name)", "--watch"]
+
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = pipe
+
+        pipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+            for line in text.components(separatedBy: .newlines) {
+                if let pct = Self.percentFrom(line) { progressHandler(pct) }
+            }
         }
-        return result.stringValue ?? ""
+
+        try proc.run()
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                proc.waitUntilExit()
+                continuation.resume()
+            }
+        }
+        pipe.fileHandleForReading.readabilityHandler = nil
+        return proc.terminationStatus
+    }
+
+    func stopTask(named name: String) {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: Self.cliPath)
+        proc.arguments = ["--stop=\(name)"]
+        try? proc.run()
+        proc.waitUntilExit()
+    }
+
+    private static func percentFrom(_ line: String) -> Double? {
+        guard let regex = try? NSRegularExpression(pattern: #"(\d+(?:\.\d+)?)%"#),
+              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+              let range = Range(match.range(at: 1), in: line) else { return nil }
+        return Double(line[range]).map { $0 / 100.0 }
     }
 }
 
@@ -24,22 +59,16 @@ final class CCCJob: BackupJob {
     let progress: CurrentValueSubject<JobProgress, Never>
 
     private let taskName: String
-    private let scriptRunner: AppleScriptRunner
-
-    private var escapedTaskName: String {
-        taskName.replacingOccurrences(of: "\\", with: "\\\\")
-                 .replacingOccurrences(of: "\"", with: "\\\"")
-    }
+    private let runner: CCCCLIRunner
 
     static func isInstalled() -> Bool {
         FileManager.default.fileExists(atPath: "/Applications/Carbon Copy Cloner.app")
     }
 
-    init(jobType: JobType, taskName: String,
-         scriptRunner: AppleScriptRunner = DefaultAppleScriptRunner()) {
+    init(jobType: JobType, taskName: String, runner: CCCCLIRunner = DefaultCCCCLIRunner()) {
         self.jobType = jobType
         self.taskName = taskName
-        self.scriptRunner = scriptRunner
+        self.runner = runner
         self.progress = CurrentValueSubject(.idle)
     }
 
@@ -47,60 +76,20 @@ final class CCCJob: BackupJob {
         progress.send(JobProgress(fraction: 0, bytesTransferred: 0,
                                   bytesTotal: 0, transferRate: "", status: .running))
 
-        let startScript = """
-        tell application "Carbon Copy Cloner"
-            run task named "\(escapedTaskName)"
-        end tell
-        """
-        try scriptRunner.run(script: startScript)
-
-        while true {
-            do {
-                try await Task.sleep(nanoseconds: 2_000_000_000)
-            } catch is CancellationError {
-                progress.send(JobProgress(
-                    fraction: progress.value.fraction,
-                    bytesTransferred: 0, bytesTotal: 0,
-                    transferRate: "", status: .failed))
-                throw CancellationError()
-            }
-
-            let pctScript = """
-            tell application "Carbon Copy Cloner"
-                get percent complete of task named "\(escapedTaskName)"
-            end tell
-            """
-            let statusScript = """
-            tell application "Carbon Copy Cloner"
-                get status of task named "\(escapedTaskName)"
-            end tell
-            """
-
-            let cccStatus = (try? scriptRunner.run(script: statusScript)) ?? ""
-            let pct = Double((try? scriptRunner.run(script: pctScript)) ?? "") ?? 0
-
-            // Only treat explicit terminal states as terminal
-            if cccStatus == "Success" || cccStatus == "Failed" || cccStatus == "Aborted" {
-                let jobStatus: JobStatus = cccStatus == "Success" ? .done : .failed
-                progress.send(JobProgress(
-                    fraction: jobStatus == .done ? 1.0 : pct / 100.0,
-                    bytesTransferred: 0, bytesTotal: 0,
-                    transferRate: "", status: jobStatus))
-                return
-            }
-
-            progress.send(JobProgress(fraction: pct / 100.0, bytesTransferred: 0,
-                                      bytesTotal: 0, transferRate: "", status: .running))
+        let exitCode = try await runner.runTask(named: taskName) { [weak self] pct in
+            self?.progress.send(JobProgress(fraction: pct, bytesTransferred: 0,
+                                            bytesTotal: 0, transferRate: "", status: .running))
         }
+
+        let jobStatus: JobStatus = exitCode == 0 ? .done : .failed
+        progress.send(JobProgress(
+            fraction: jobStatus == .done ? 1.0 : progress.value.fraction,
+            bytesTransferred: 0, bytesTotal: 0,
+            transferRate: "", status: jobStatus))
     }
 
     func cancel() {
-        let script = """
-        tell application "Carbon Copy Cloner"
-            abort task named "\(escapedTaskName)"
-        end tell
-        """
-        try? scriptRunner.run(script: script)
+        runner.stopTask(named: taskName)
         progress.send(JobProgress(
             fraction: progress.value.fraction,
             bytesTransferred: 0, bytesTotal: 0,

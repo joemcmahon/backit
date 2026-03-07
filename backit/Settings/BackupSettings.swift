@@ -7,10 +7,10 @@ final class BackupSettings: ObservableObject {
     @Published var backupTime: Date        { didSet { defaults.set(backupTime, forKey: "backupTime") } }
     @Published var earlyReminderTime: Date { didSet { defaults.set(earlyReminderTime, forKey: "earlyReminderTime") } }
     @Published var lateReminderTime: Date  { didSet { defaults.set(lateReminderTime, forKey: "lateReminderTime") } }
-    @Published var diskCCCTaskName: String { didSet { defaults.set(diskCCCTaskName, forKey: "diskCCCTaskName") } }
-    @Published var bootableCCCTaskName: String { didSet { defaults.set(bootableCCCTaskName, forKey: "bootableCCCTaskName") } }
-    @Published var dropboxRemoteName: String { didSet { defaults.set(dropboxRemoteName, forKey: "dropboxRemoteName") } }
-    @Published var dropboxVolumePath: String { didSet { defaults.set(dropboxVolumePath, forKey: "dropboxVolumePath") } }
+    @Published var diskCCCTaskName: String { didSet { defaults.set(diskCCCTaskName.trimmingCharacters(in: .whitespaces), forKey: "diskCCCTaskName") } }
+    @Published var bootableCCCTaskName: String { didSet { defaults.set(bootableCCCTaskName.trimmingCharacters(in: .whitespaces), forKey: "bootableCCCTaskName") } }
+    @Published var dropboxRemoteName: String { didSet { defaults.set(dropboxRemoteName.trimmingCharacters(in: .whitespaces), forKey: "dropboxRemoteName") } }
+    @Published var dropboxVolumePath: String { didSet { defaults.set(dropboxVolumePath.trimmingCharacters(in: .whitespaces), forKey: "dropboxVolumePath") } }
     @Published var historyLimit: Int       { didSet { defaults.set(historyLimit, forKey: "historyLimit") } }
     @Published var storedMachineUUID: String { didSet { defaults.set(storedMachineUUID, forKey: "storedMachineUUID") } }
     @Published var skipTonight: Bool       { didSet { defaults.set(skipTonight, forKey: "skipTonight") } }
