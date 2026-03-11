@@ -6,17 +6,22 @@ final class BackupCoordinator: ObservableObject {
     @Published var isRunning = false
     @Published var currentJobType: JobType?
     @Published var currentProgress: JobProgress = .idle
+    @Published var cccProgress: JobProgress = .idle
+    @Published var dropboxProgress: JobProgress = .idle
     @Published var lastRunStatus: RunStatus?
     @Published var lastRunDate: Date?
+    @Published var lastRcloneSummary: String?
+    @Published var currentJobStartDate: Date?
+    @Published var rcloneStats: RcloneStats = .idle
 
     private let db: DatabaseManager
     private let settings: BackupSettings
-    private let jobFactory: (BackupSettings) -> [any BackupJob]
+    private let jobFactory: @MainActor (BackupSettings) -> [any BackupJob]
     private var runningTask: Task<Void, Never>?
 
     init(db: DatabaseManager,
          settings: BackupSettings,
-         jobFactory: @escaping (BackupSettings) -> [any BackupJob] = BackupCoordinator.defaultFactory) {
+         jobFactory: @escaping @MainActor (BackupSettings) -> [any BackupJob] = BackupCoordinator.defaultFactory) {
         self.db = db
         self.settings = settings
         self.jobFactory = jobFactory
@@ -29,7 +34,8 @@ final class BackupCoordinator: ObservableObject {
         }
         if DropboxJob.isInstalled() {
             jobs.append(DropboxJob(remoteName: settings.dropboxRemoteName,
-                                   volumePath: settings.dropboxVolumePath))
+                                   volumePath: settings.dropboxVolumePath,
+                                   verify: settings.verifyAfterSync))
         }
         // Bootable clone task disabled until a real CCC bootable task is configured
         // if CCCJob.isInstalled() {
@@ -43,16 +49,49 @@ final class BackupCoordinator: ObservableObject {
         runningTask = Task { await performBackup() }
     }
 
+    func runVerifyOnly() {
+        guard !isRunning else { return }
+        runningTask = Task { await performVerification() }
+    }
+
+    func recordSkipped() {
+        lastRunStatus = .skipped
+        lastRunDate = Date()
+    }
+
     func cancelBackup() {
         runningTask?.cancel()
         runningTask = nil
+        currentJobType = nil
+        // isRunning stays true until performBackup() finishes its cleanup and sets it false.
+        // This prevents runBackup() from starting a second backup while the first is still winding down.
+    }
+
+    func performVerification() async {
+        isRunning = true
+        rcloneStats = RcloneStats(status: .running)
+        currentJobType = .dropbox
+        currentJobStartDate = Date()
+        let job = DropboxJob(remoteName: settings.dropboxRemoteName,
+                             volumePath: settings.dropboxVolumePath,
+                             verify: true)
+        let statsTask = Task { [weak self] in
+            for await stats in job.statsSubject.values {
+                self?.rcloneStats = stats
+            }
+        }
+        await job.verifyOnly()
+        statsTask.cancel()
         isRunning = false
         currentJobType = nil
+        currentJobStartDate = nil
+        runningTask = nil
     }
 
     // Internal — also called directly by tests
     func performBackup() async {
         isRunning = true
+        rcloneStats = .idle
 
         let currentUUID = MacOSVersionDetector.hardwareUUID()
         if !settings.storedMachineUUID.isEmpty,
@@ -72,24 +111,52 @@ final class BackupCoordinator: ObservableObject {
         var anyFailed = false
         var anySucceeded = false
 
+        // Mark all jobs after the first as "waiting" so the UI doesn't show blank progress
+        let waiting = JobProgress(fraction: 0, bytesTransferred: 0, bytesTotal: 0,
+                                  transferRate: "Waiting…", status: .idle)
+        for job in jobs.dropFirst() {
+            switch job.jobType {
+            case .disk, .bootable: cccProgress = waiting
+            case .dropbox:         dropboxProgress = waiting
+            }
+        }
+
         for job in jobs {
+            guard !Task.isCancelled else { break }
             currentJobType = job.jobType
             let jobStart = Date()
+            currentJobStartDate = jobStart
 
-            // Forward live progress into coordinator's published property
+            // Forward live progress into coordinator's published properties
             let progressTask = Task { [weak self] in
                 for await p in job.progress.values {
                     self?.currentProgress = p
+                    switch job.jobType {
+                    case .disk, .bootable: self?.cccProgress = p
+                    case .dropbox:         self?.dropboxProgress = p
+                    }
+                }
+            }
+            let statsTask: Task<Void, Never>? = (job as? DropboxJob).map { dropboxJob in
+                Task { [weak self] in
+                    for await stats in dropboxJob.statsSubject.values {
+                        self?.rcloneStats = stats
+                    }
                 }
             }
 
             do {
                 try await job.start()
             } catch {
-                print("[BackupCoordinator] \(job.jobType) failed: \(error)")
+                // Cancellation and job errors are reflected in job.progress.value.status
             }
 
             progressTask.cancel()
+            statsTask?.cancel()
+            if let dropboxJob = job as? DropboxJob {
+                if !dropboxJob.summary.isEmpty { lastRcloneSummary = dropboxJob.summary }
+                if let logTime = dropboxJob.lastLogTimestamp { lastRunDate = logTime }
+            }
             let fp = job.progress.value
             let duration = Int(Date().timeIntervalSince(jobStart))
             var result = JobResult(runId: runId,
@@ -121,7 +188,11 @@ final class BackupCoordinator: ObservableObject {
         lastRunDate = Date()
         isRunning = false
         currentJobType = nil
+        currentJobStartDate = nil
+        cccProgress = .idle
+        dropboxProgress = .idle
         currentProgress = .idle
+        rcloneStats = .idle
         runningTask = nil
     }
 }

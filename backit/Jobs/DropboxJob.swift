@@ -1,28 +1,5 @@
 import Foundation
-import Combine
-
-private func freePort() -> Int {
-    let sock = socket(AF_INET, SOCK_STREAM, 0)
-    guard sock >= 0 else { return 5572 }
-    defer { close(sock) }
-    var addr = sockaddr_in()
-    addr.sin_family = sa_family_t(AF_INET)
-    addr.sin_port = 0
-    addr.sin_addr.s_addr = INADDR_LOOPBACK
-    let bound = withUnsafeMutablePointer(to: &addr) {
-        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-            bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
-        }
-    }
-    guard bound == 0 else { return 5572 }
-    var len = socklen_t(MemoryLayout<sockaddr_in>.size)
-    withUnsafeMutablePointer(to: &addr) {
-        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-            getsockname(sock, $0, &len)
-        }
-    }
-    return Int(addr.sin_port.bigEndian)
-}
+@preconcurrency import Combine
 
 final class DropboxJob: BackupJob {
     let jobType: JobType = .dropbox
@@ -30,45 +7,103 @@ final class DropboxJob: BackupJob {
 
     private let remoteName: String
     private let volumePath: String
-    private let rcPort: Int
+    private let verify: Bool
     private var process: Process?
-    private var pollTask: Task<Void, Never>?
+    // nonisolated(unsafe): only mutated from the serial readability handler + start() (safe by construction)
+    nonisolated(unsafe) private var failedPaths: [String] = []
+    nonisolated(unsafe) private var failedDirectories: [String] = []
+    nonisolated(unsafe) private var statsBuffer: [String] = []   // last 12 lines — summary sheet
+    nonisolated(unsafe) private var logFileHandle: FileHandle? = nil
+    nonisolated(unsafe) private var currentStats = RcloneStats.idle
+    nonisolated(unsafe) private(set) var lastLogTimestamp: Date? = nil
+    let statsSubject = CurrentValueSubject<RcloneStats, Never>(.idle)
+    // Final stats block text, available after start() returns.
+    private(set) var summary: String = ""
 
-    static func isInstalled() -> Bool {
+    static let logFilePath = "/tmp/backit-rclone.log"
+
+    nonisolated static func isInstalled() -> Bool {
         ["/usr/local/bin/rclone", "/opt/homebrew/bin/rclone"].contains {
             let resolved = URL(fileURLWithPath: $0).resolvingSymlinksInPath().path
             return FileManager.default.fileExists(atPath: resolved)
         }
     }
 
-    init(remoteName: String, volumePath: String, rcPort: Int = freePort()) {
+    init(remoteName: String, volumePath: String, verify: Bool = true) {
         self.remoteName = remoteName
         self.volumePath = volumePath
-        self.rcPort = rcPort
+        self.verify = verify
         self.progress = CurrentValueSubject(.idle)
     }
 
     func start() async throws {
         killOrphanedRclones()
+        failedPaths = []
+        failedDirectories = []
+        statsBuffer = []
+        summary = ""
+        currentStats = RcloneStats(status: .running)
+        statsSubject.send(currentStats)
+        // Create/truncate log file and open for live writing
+        FileManager.default.createFile(atPath: Self.logFilePath, contents: nil)
+        logFileHandle = FileHandle(forWritingAtPath: Self.logFilePath)
 
         progress.send(JobProgress(fraction: 0, bytesTransferred: 0,
-                                  bytesTotal: 0, transferRate: "", status: .running))
+                                  bytesTotal: 0, transferRate: "Starting…", status: .running))
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: rclonePath())
         proc.arguments = [
             "sync", "\(remoteName):", volumePath.trimmingCharacters(in: .whitespaces),
             "--metadata",
+            "--fast-list",
             "--tpslimit", "12", "--tpslimit-burst", "0",
-            "-L",
-            "--transfers", "8", "--checkers", "8",
-            "--rc", "--rc-addr", "localhost:\(rcPort)"
+            "--transfers", "4", "--checkers", "4",
+            "--retries", "1", "--low-level-retries", "1",
+            "--ignore-errors",
+            "--stats", "2s", "--stats-log-level", "NOTICE"
         ]
-        print("[DropboxJob] launching: \(rclonePath()) \(proc.arguments?.joined(separator: " ") ?? "")")
+
+        let pipe = Pipe()
+        proc.standardError = pipe
+
+        // Capture subjects directly — they're Sendable, avoids main-actor property access
+        let progressSubject = self.progress
+        let statsRef = self.statsSubject
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+            for line in text.components(separatedBy: .newlines) {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if !trimmed.isEmpty {
+                    self?.statsBuffer.append(trimmed)
+                    if (self?.statsBuffer.count ?? 0) > 12 { self?.statsBuffer.removeFirst() }
+                }
+                if let lineData = (line + "\n").data(using: .utf8) {
+                    self?.logFileHandle?.write(lineData)
+                }
+                if let ts = RcloneStatsParser.parseTimestamp(line) {
+                    self?.lastLogTimestamp = ts
+                }
+                if var stats = self?.currentStats {
+                    if RcloneStatsParser.updateStats(&stats, from: line) {
+                        self?.currentStats = stats
+                        statsRef.send(stats)
+                    }
+                }
+                if let update = RcloneStatsParser.parseLine(line) {
+                    progressSubject.send(update)
+                } else if let failedDir = RcloneStatsParser.parseDirectoryError(line) {
+                    self?.failedDirectories.append(failedDir)
+                } else if let failedPath = RcloneStatsParser.parseError(line) {
+                    self?.failedPaths.append(failedPath)
+                }
+            }
+        }
+
         self.process = proc
         try proc.run()
 
-        pollTask = Task { await pollStats() }
         await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 DispatchQueue.global(qos: .utility).async {
@@ -79,27 +114,43 @@ final class DropboxJob: BackupJob {
         } onCancel: {
             proc.terminate()
         }
-        pollTask?.cancel()
-        self.process = nil
 
-        let jobStatus: JobStatus = proc.terminationStatus == 0 ? .done : .failed
+        pipe.fileHandleForReading.readabilityHandler = nil
+        self.process = nil
+        logFileHandle?.closeFile()
+        logFileHandle = nil
+        summary = statsBuffer.joined(separator: "\n")
+
+        // Targeted retry for any files that failed during the main sync.
+        // Skip post-processing entirely if the task was cancelled — avoids spawning new rclone processes.
+        guard !Task.isCancelled else { return }
+        let persistentlyFailed = await retryFailedPaths(failedPaths)
+        guard !Task.isCancelled else { return }
+        await cleanupFailedDirectories(failedDirectories)
+        if verify && !Task.isCancelled { await runVerification() }
+        let succeeded = proc.terminationStatus == 0 || currentStats.onlyRateLimitErrors
+        currentStats.status = (succeeded || !persistentlyFailed.isEmpty) ? .done : .failed
+        statsSubject.send(currentStats)
+        let rateText: String
+        if !persistentlyFailed.isEmpty {
+            rateText = "Done — \(persistentlyFailed.count) file\(persistentlyFailed.count == 1 ? "" : "s") skipped"
+        } else if succeeded && currentStats.rateLimitHits > 0 {
+            rateText = "Done — \(currentStats.rateLimitHits) rate limit hit\(currentStats.rateLimitHits == 1 ? "" : "s")"
+        } else if succeeded {
+            rateText = "Complete"
+        } else {
+            rateText = "Failed"
+        }
+        let finalStatus: JobStatus = (succeeded || !persistentlyFailed.isEmpty) ? .done : .failed
         progress.send(JobProgress(
-            fraction: jobStatus == .done ? 1.0 : progress.value.fraction,
+            fraction: finalStatus == .done ? 1.0 : progress.value.fraction,
             bytesTransferred: progress.value.bytesTransferred,
             bytesTotal: progress.value.bytesTotal,
-            transferRate: "", status: jobStatus))
-    }
-
-    private func killOrphanedRclones() {
-        let killer = Process()
-        killer.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        killer.arguments = ["-f", "rclone sync"]
-        try? killer.run()
-        // Don't waitUntilExit — fire-and-forget is fine for pkill
+            transferRate: rateText,
+            status: finalStatus))
     }
 
     func cancel() {
-        pollTask?.cancel()
         process?.terminate()
         process?.waitUntilExit()
         process = nil
@@ -107,24 +158,202 @@ final class DropboxJob: BackupJob {
             fraction: progress.value.fraction,
             bytesTransferred: progress.value.bytesTransferred,
             bytesTotal: progress.value.bytesTotal,
-            transferRate: "", status: .failed))
+            transferRate: "Cancelled",
+            status: .failed))
     }
 
-    private func pollStats() async {
-        let url = URL(string: "http://localhost:\(rcPort)/core/stats")!
-        while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            guard !Task.isCancelled else { break }
-            if let data = try? await URLSession.shared.data(from: url).0,
-               let stats = try? RcloneStatsParser.parse(data: data) {
-                progress.send(JobProgress(
-                    fraction: stats.fraction,
-                    bytesTransferred: stats.bytesTransferred,
-                    bytesTotal: stats.bytesTotal,
-                    transferRate: stats.transferRate,
-                    status: .running))
+    // Standalone verify — skips sync, runs only the rclone check phase.
+    func verifyOnly() async {
+        currentStats = RcloneStats(status: .running)
+        currentStats.verifyMode = true
+        statsSubject.send(currentStats)
+        await runVerification()
+        currentStats.status = .done
+        statsSubject.send(currentStats)
+    }
+
+    // Verification phase: rclone check --one-way to confirm source matches destination.
+    private func runVerification() async {
+        killOrphanedRclones(matching: "rclone check")
+        progress.send(JobProgress(
+            fraction: 1.0,
+            bytesTransferred: progress.value.bytesTransferred,
+            bytesTotal: progress.value.bytesTotal,
+            transferRate: "Verifying…",
+            status: .running))
+        currentStats.verificationDifferences = nil
+        currentStats.verifyMode = true
+        statsSubject.send(currentStats)
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: rclonePath())
+        let checkReportPath = "/tmp/backit-check.txt"
+        FileManager.default.createFile(atPath: checkReportPath, contents: nil)
+        proc.arguments = [
+            "check",
+            "\(remoteName):", volumePath.trimmingCharacters(in: .whitespaces),
+            "--one-way",
+            "--fast-list",
+            "--tpslimit", "12", "--tpslimit-burst", "0",
+            "--checkers", "4",
+            "--stats", "2s", "--stats-log-level", "NOTICE",
+            "--combined", checkReportPath
+        ]
+
+        // Discard stderr — rclone check produces no useful stderr output
+        proc.standardError = Pipe()
+
+        guard (try? proc.run()) != nil else { return }
+
+        // Poll the combined file every 2s for live checked-file count
+        let pollTask = Task { [weak self] in
+            var offset: UInt64 = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard !Task.isCancelled else { break }
+                if let fh = FileHandle(forReadingAtPath: checkReportPath) {
+                    try? fh.seek(toOffset: offset)
+                    let data = fh.readDataToEndOfFile()
+                    fh.closeFile()
+                    offset += UInt64(data.count)
+                    if var stats = self?.currentStats,
+                       let text = String(data: data, encoding: .utf8) {
+                        for line in text.components(separatedBy: .newlines) where !line.isEmpty {
+                            switch line.prefix(1) {
+                            case "=": stats.verifySame += 1
+                            case "+": stats.verifyMissingFromDest += 1
+                            case "-": stats.verifyMissingFromSource += 1
+                            case "*": stats.verifyDifferent += 1
+                            case "!":
+                                // Don't count 409s as check errors
+                                if !line.contains("too_many_requests") {
+                                    stats.verifyCheckErrors += 1
+                                }
+                            default: break
+                            }
+                        }
+                        self?.currentStats = stats
+                        self?.statsSubject.send(stats)
+                    }
+                }
             }
         }
+
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                proc.waitUntilExit()
+                continuation.resume()
+            }
+        }
+        pollTask.cancel()
+
+        // Read combined report — lines not starting with '=' are mismatches
+        let reportText = (try? String(contentsOfFile: checkReportPath, encoding: .utf8)) ?? ""
+        let mismatches = reportText.components(separatedBy: .newlines)
+            .filter { !$0.isEmpty && !$0.hasPrefix("=") && !$0.contains("too_many_requests") }
+            .map { line -> String in
+                let flag = line.prefix(1)
+                let path = line.dropFirst(2)
+                switch flag {
+                case "+": return "+ \(path)  (missing from backup)"
+                case "-": return "- \(path)  (missing from source)"
+                case "*": return "* \(path)  (differs)"
+                case "!": return "! \(path)  (read error)"
+                default:  return String(line)
+                }
+            }
+        currentStats.verificationMismatches = mismatches
+        currentStats.verificationDifferences = proc.terminationStatus == 0 ? 0 : mismatches.count
+        statsSubject.send(currentStats)
+    }
+
+    // Cleanup phase: re-sync each directory that had a read error, one at a time.
+    // Ensures no files were missed due to rate-limit-induced directory read failures.
+    private func cleanupFailedDirectories(_ dirs: [String]) async {
+        guard !dirs.isEmpty else { return }
+        let unique = Array(Set(dirs)).sorted()
+        let dest = volumePath.trimmingCharacters(in: .whitespaces)
+        for (i, dir) in unique.enumerated() {
+            let count = unique.count
+            progress.send(JobProgress(
+                fraction: 1.0,
+                bytesTransferred: progress.value.bytesTransferred,
+                bytesTotal: progress.value.bytesTotal,
+                transferRate: "Cleanup phase: \(i + 1)/\(count)",
+                status: .running))
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: rclonePath())
+            proc.arguments = [
+                "sync", "\(remoteName):\(dir)", "\(dest)/\(dir)",
+                "--tpslimit", "12", "--tpslimit-burst", "0",
+                "--retries", "2", "--low-level-retries", "2",
+                "--stats", "2s", "--stats-log-level", "NOTICE",
+                "--ignore-errors"
+            ]
+            proc.standardError = Pipe()  // discard; errors logged separately
+            guard (try? proc.run()) != nil else { continue }
+            await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .utility).async {
+                    proc.waitUntilExit()
+                    continuation.resume()
+                }
+            }
+        }
+    }
+
+    // Runs up to 2 targeted `rclone copy --files-from` passes on failed paths.
+    // Returns paths that still could not be copied after all attempts.
+    private func retryFailedPaths(_ paths: [String]) async -> [String] {
+        guard !paths.isEmpty else { return [] }
+        var remaining = paths
+        for attempt in 1...2 {
+            guard !remaining.isEmpty else { break }
+            let count = remaining.count
+            progress.send(JobProgress(
+                fraction: 1.0,
+                bytesTransferred: progress.value.bytesTransferred,
+                bytesTotal: progress.value.bytesTotal,
+                transferRate: "Retrying \(count) file\(count == 1 ? "" : "s")… (pass \(attempt))",
+                status: .running))
+
+            let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("rclone-retry-\(attempt).txt")
+            try? remaining.joined(separator: "\n").write(to: tmpURL, atomically: true, encoding: .utf8)
+            defer { try? FileManager.default.removeItem(at: tmpURL) }
+
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: rclonePath())
+            proc.arguments = [
+                "copy",
+                "--files-from", tmpURL.path,
+                "\(remoteName):", volumePath.trimmingCharacters(in: .whitespaces),
+                "--retries", "1", "--low-level-retries", "1",
+                "--stats", "2s"
+            ]
+            let errPipe = Pipe()
+            proc.standardError = errPipe
+            guard (try? proc.run()) != nil else { break }
+            await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .utility).async {
+                    proc.waitUntilExit()
+                    continuation.resume()
+                }
+            }
+            // Read all stderr after exit — avoids concurrent mutation issues
+            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+            let errText = String(data: errData, encoding: .utf8) ?? ""
+            remaining = errText.components(separatedBy: .newlines)
+                .compactMap { RcloneStatsParser.parseError($0) }
+        }
+        return remaining
+    }
+
+    private func killOrphanedRclones(matching pattern: String = "rclone") {
+        let killer = Process()
+        killer.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        killer.arguments = ["-f", pattern]
+        try? killer.run()
+        killer.waitUntilExit()  // must complete before we launch a new rclone
     }
 
     private func rclonePath() -> String {

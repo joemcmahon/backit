@@ -1,5 +1,5 @@
 import Foundation
-import Combine
+@preconcurrency import Combine
 
 // Injectable protocol so tests never invoke the real CCC CLI
 protocol CCCCLIRunner: AnyObject {
@@ -23,7 +23,11 @@ final class DefaultCCCCLIRunner: CCCCLIRunner {
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
             for line in text.components(separatedBy: .newlines) {
-                if let pct = Self.percentFrom(line) { progressHandler(pct) }
+                if let pct = Self.percentFrom(line) {
+                    progressHandler(pct)
+                } else if line.contains("Progress: -1") {
+                    progressHandler(-1)
+                }
             }
         }
 
@@ -46,7 +50,7 @@ final class DefaultCCCCLIRunner: CCCCLIRunner {
         proc.waitUntilExit()
     }
 
-    private static func percentFrom(_ line: String) -> Double? {
+    nonisolated private static func percentFrom(_ line: String) -> Double? {
         guard let regex = try? NSRegularExpression(pattern: #"(\d+(?:\.\d+)?)%"#),
               let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
               let range = Range(match.range(at: 1), in: line) else { return nil }
@@ -61,7 +65,7 @@ final class CCCJob: BackupJob {
     private let taskName: String
     private let runner: CCCCLIRunner
 
-    static func isInstalled() -> Bool {
+    nonisolated static func isInstalled() -> Bool {
         FileManager.default.fileExists(atPath: "/Applications/Carbon Copy Cloner.app")
     }
 
@@ -77,8 +81,13 @@ final class CCCJob: BackupJob {
                                   bytesTotal: 0, transferRate: "", status: .running))
 
         let exitCode = try await runner.runTask(named: taskName) { [weak self] pct in
-            self?.progress.send(JobProgress(fraction: pct, bytesTransferred: 0,
-                                            bytesTotal: 0, transferRate: "", status: .running))
+            if pct < 0 {
+                self?.progress.send(JobProgress(fraction: 0, bytesTransferred: 0,
+                                                bytesTotal: 0, transferRate: "Scanning…", status: .running))
+            } else {
+                self?.progress.send(JobProgress(fraction: pct, bytesTransferred: 0,
+                                                bytesTotal: 0, transferRate: "", status: .running))
+            }
         }
 
         let jobStatus: JobStatus = exitCode == 0 ? .done : .failed

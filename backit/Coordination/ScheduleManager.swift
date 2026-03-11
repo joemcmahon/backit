@@ -9,6 +9,7 @@ final class ScheduleManager: ObservableObject {
     @Published var nextBackupDate: Date?
 
     var onBackupTriggered: (() -> Void)?
+    var onBackupSkipped: (() -> Void)?
 
     private let settings: BackupSettings
     private var timers: [Timer] = []
@@ -49,11 +50,11 @@ final class ScheduleManager: ObservableObject {
         let nc = NSWorkspace.shared.notificationCenter
         let mount = nc.addObserver(forName: NSWorkspace.didMountNotification,
                                    object: nil, queue: .main) { [weak self] _ in
-            self?.checkDiskPresence()
+            MainActor.assumeIsolated { self?.checkDiskPresence() }
         }
         let unmount = nc.addObserver(forName: NSWorkspace.didUnmountNotification,
                                      object: nil, queue: .main) { [weak self] _ in
-            self?.checkDiskPresence()
+            MainActor.assumeIsolated { self?.checkDiskPresence() }
         }
         volumeObservers = [mount, unmount]
     }
@@ -63,9 +64,9 @@ final class ScheduleManager: ObservableObject {
     private func scheduleAllTimers() {
         timers.forEach { $0.invalidate() }
         timers = [
-            makeDaily(time: settings.earlyReminderTime) { [weak self] in self?.fireEarlyReminder() },
-            makeDaily(time: settings.lateReminderTime)  { [weak self] in self?.fireLateReminder() },
-            makeDaily(time: settings.backupTime)        { [weak self] in self?.fireBackupTimer() }
+            makeDaily(time: settings.backupReminderTime)  { [weak self] in self?.fireBackupReminder() },
+            makeDaily(time: settings.preflightWarningTime) { [weak self] in self?.firePreflightWarning() },
+            makeDaily(time: settings.backupTime)           { [weak self] in self?.fireBackupTimer() }
         ]
         nextBackupDate = nextOccurrence(of: settings.backupTime)
     }
@@ -87,37 +88,36 @@ final class ScheduleManager: ObservableObject {
 
     // MARK: - Timer actions
 
-    private func fireEarlyReminder() {
+    private func fireBackupReminder() {
         checkDiskPresence()
+        guard isUserActive() else { return }
         let timeStr = shortTime(settings.backupTime)
         if diskPresent {
             notify(title: "Backup Tonight",
                    body: "Backup scheduled at \(timeStr) — you might want to wrap up.")
         } else {
-            notify(title: "Connect Your Backup Drive",
-                   body: "Backup scheduled at \(timeStr). Drive not connected yet.")
+            notify(title: "Backup Tonight",
+                   body: "Backup scheduled at \(timeStr) — your backup drive isn't connected yet.")
         }
     }
 
-    private func fireLateReminder() {
+    private func firePreflightWarning() {
         checkDiskPresence()
         guard !diskPresent else { return }
-        notify(title: "Backup Drive Still Not Connected",
-               body: "Your backup drive isn't connected. Tonight's backup may not run.")
+        guard isUserActive() else { return }
+        notify(title: "Backup Drive Not Connected",
+               body: "Backup is coming up soon and your drive isn't connected.",
+               categoryID: "PREFLIGHT_WARNING")
     }
 
     private func fireBackupTimer() {
         checkDiskPresence()
-        guard !settings.skipTonight else { settings.skipTonight = false; return }
+        guard !settings.skipTonight else { settings.skipTonight = false; onBackupSkipped?(); return }
         guard diskPresent else {
-            notify(title: "Backup Skipped", body: "Backup drive not connected.")
+            onBackupSkipped?()
             return
         }
-        if isUserActive() {
-            notifyLateCheck()
-        } else {
-            onBackupTriggered?()
-        }
+        onBackupTriggered?()
     }
 
     private func isUserActive() -> Bool {
@@ -135,12 +135,6 @@ final class ScheduleManager: ObservableObject {
         let req = UNNotificationRequest(identifier: UUID().uuidString,
                                          content: content, trigger: nil)
         UNUserNotificationCenter.current().add(req)
-    }
-
-    private func notifyLateCheck() {
-        notify(title: "It's Backup Time",
-               body:  "Stop work and back up now, or skip for later?",
-               categoryID: "LATE_CHECK")
     }
 
     private func shortTime(_ date: Date) -> String {

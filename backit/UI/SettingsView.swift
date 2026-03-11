@@ -9,11 +9,11 @@ struct SettingsView: View {
                 DatePicker("Backup time",
                            selection: $settings.backupTime,
                            displayedComponents: .hourAndMinute)
-                DatePicker("Early reminder",
-                           selection: $settings.earlyReminderTime,
+                DatePicker("Backup reminder",
+                           selection: $settings.backupReminderTime,
                            displayedComponents: .hourAndMinute)
-                DatePicker("Late reminder",
-                           selection: $settings.lateReminderTime,
+                DatePicker("Preflight warning",
+                           selection: $settings.preflightWarningTime,
                            displayedComponents: .hourAndMinute)
             }
 
