@@ -21,6 +21,7 @@ final class ScheduleManager: ObservableObject {
         checkDiskPresence()
         scheduleAllTimers()
         observeVolumes()
+        observeTimeSettings()
     }
 
     deinit {
@@ -61,12 +62,28 @@ final class ScheduleManager: ObservableObject {
 
     // MARK: - Timers
 
+    private func observeTimeSettings() {
+        settings.$backupTime
+            .combineLatest(settings.$preflightIntervalMinutes, settings.$reminderIntervalMinutes)
+            .dropFirst()
+            .sink { [weak self] _ in self?.scheduleAllTimers() }
+            .store(in: &cancellables)
+    }
+
+    private func scheduledPreflightTime() -> Date {
+        settings.backupTime - TimeInterval(settings.preflightIntervalMinutes * 60)
+    }
+
+    private func scheduledReminderTime() -> Date {
+        scheduledPreflightTime() - TimeInterval(settings.reminderIntervalMinutes * 60)
+    }
+
     private func scheduleAllTimers() {
         timers.forEach { $0.invalidate() }
         timers = [
-            makeDaily(time: settings.backupReminderTime)  { [weak self] in self?.fireBackupReminder() },
-            makeDaily(time: settings.preflightWarningTime) { [weak self] in self?.firePreflightWarning() },
-            makeDaily(time: settings.backupTime)           { [weak self] in self?.fireBackupTimer() }
+            makeDaily(time: scheduledReminderTime())  { [weak self] in self?.fireBackupReminder() },
+            makeDaily(time: scheduledPreflightTime()) { [weak self] in self?.firePreflightWarning() },
+            makeDaily(time: settings.backupTime)      { [weak self] in self?.fireBackupTimer() }
         ]
         nextBackupDate = nextOccurrence(of: settings.backupTime)
     }
@@ -114,6 +131,8 @@ final class ScheduleManager: ObservableObject {
         checkDiskPresence()
         guard !settings.skipTonight else { settings.skipTonight = false; onBackupSkipped?(); return }
         guard diskPresent else {
+            notify(title: "Backup Skipped",
+                   body: "Backup drive was not connected at \(shortTime(settings.backupTime)) — backup did not run.")
             onBackupSkipped?()
             return
         }

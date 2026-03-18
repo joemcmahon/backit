@@ -39,15 +39,25 @@ struct BackitMainView: View {
 
             // Bottom bar
             HStack {
-                if let date = coordinator.lastRunDate, let status = coordinator.lastRunStatus {
-                    let fmt = DateFormatter()
-                    let _ = { fmt.dateStyle = .medium; fmt.timeStyle = .short }()
-                    Label(fmt.string(from: date),
-                          systemImage: status == .success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                        .foregroundColor(status == .success ? .green : .orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    if let date = coordinator.lastRunDate, let status = coordinator.lastRunStatus {
+                        let fmt = DateFormatter()
+                        let _ = { fmt.dateStyle = .medium; fmt.timeStyle = .short }()
+                        Label(fmt.string(from: date),
+                              systemImage: status == .success ? "checkmark.circle.fill" :
+                                           status == .skipped ? "minus.circle.fill" :
+                                           "exclamationmark.triangle.fill")
+                            .foregroundColor(status == .success ? .green :
+                                             status == .skipped ? .secondary : .orange)
+                            .font(.caption)
+                    } else {
+                        Text("No backup yet").font(.caption).foregroundColor(.secondary)
+                    }
+                    let timeFmt = DateFormatter()
+                    let _ = { timeFmt.timeStyle = .short }()
+                    Text("Next automatic backup: \(timeFmt.string(from: settings.backupTime))")
                         .font(.caption)
-                } else {
-                    Text("No backup yet").font(.caption).foregroundColor(.secondary)
+                        .foregroundColor(.secondary)
                 }
 
                 Spacer()
@@ -246,16 +256,62 @@ struct JobSectionView: View {
 struct ScheduleSheetView: View {
     @ObservedObject var settings: BackupSettings
     @Environment(\.dismiss) var dismiss
+    @State private var preflightCustom = false
+    @State private var reminderCustom = false
+
+    private let intervalPresets = [5, 10, 30, 60, 120]
+
+    private var computedTimesLabel: String {
+        let fmt = DateFormatter(); fmt.timeStyle = .short
+        let preflight = settings.backupTime - TimeInterval(settings.preflightIntervalMinutes * 60)
+        let reminder  = preflight - TimeInterval(settings.reminderIntervalMinutes * 60)
+        return "Reminder \(fmt.string(from: reminder)) · Final check \(fmt.string(from: preflight)) · Backup \(fmt.string(from: settings.backupTime))"
+    }
+
+    private func intervalLabel(_ minutes: Int) -> String {
+        switch minutes {
+        case 60:  return "1 hour before"
+        case 120: return "2 hours before"
+        default:  return "\(minutes) min before"
+        }
+    }
 
     var body: some View {
         Form {
             Section("Schedule") {
                 DatePicker("Backup time", selection: $settings.backupTime,
                            displayedComponents: .hourAndMinute)
-                DatePicker("Backup reminder", selection: $settings.backupReminderTime,
-                           displayedComponents: .hourAndMinute)
-                DatePicker("Preflight warning", selection: $settings.preflightWarningTime,
-                           displayedComponents: .hourAndMinute)
+                Picker("Final pre-backup check", selection: Binding(
+                    get: { preflightCustom ? -1 : settings.preflightIntervalMinutes },
+                    set: { val in
+                        if val == -1 { preflightCustom = true }
+                        else { preflightCustom = false; settings.preflightIntervalMinutes = val }
+                    }
+                )) {
+                    ForEach(intervalPresets, id: \.self) { Text(intervalLabel($0) + " backup").tag($0) }
+                    Text("Custom…").tag(-1)
+                }
+                if preflightCustom {
+                    Stepper("\(settings.preflightIntervalMinutes) min before backup",
+                            value: $settings.preflightIntervalMinutes, in: 1...480, step: 5)
+                }
+                Picker("Backup reminder", selection: Binding(
+                    get: { reminderCustom ? -1 : settings.reminderIntervalMinutes },
+                    set: { val in
+                        if val == -1 { reminderCustom = true }
+                        else { reminderCustom = false; settings.reminderIntervalMinutes = val }
+                    }
+                )) {
+                    ForEach(intervalPresets, id: \.self) { Text(intervalLabel($0) + " final check").tag($0) }
+                    Text("Custom…").tag(-1)
+                }
+                if reminderCustom {
+                    Stepper("\(settings.reminderIntervalMinutes) min before final check",
+                            value: $settings.reminderIntervalMinutes, in: 1...480, step: 5)
+                }
+                Text(computedTimesLabel)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
             Section("History") {
                 Stepper("Keep \(settings.historyLimit) run\(settings.historyLimit == 1 ? "" : "s")",

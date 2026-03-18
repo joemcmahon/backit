@@ -4,9 +4,9 @@ import Combine
 final class BackupSettings: ObservableObject {
     private let defaults: UserDefaults
 
-    @Published var backupTime: Date        { didSet { defaults.set(backupTime, forKey: "backupTime") } }
-    @Published var backupReminderTime: Date  { didSet { defaults.set(backupReminderTime, forKey: "backupReminderTime") } }
-    @Published var preflightWarningTime: Date { didSet { defaults.set(preflightWarningTime, forKey: "preflightWarningTime") } }
+    @Published var backupTime: Date              { didSet { defaults.set(backupTime, forKey: "backupTime") } }
+    @Published var preflightIntervalMinutes: Int { didSet { defaults.set(preflightIntervalMinutes, forKey: "preflightIntervalMinutes") } }
+    @Published var reminderIntervalMinutes: Int  { didSet { defaults.set(reminderIntervalMinutes, forKey: "reminderIntervalMinutes") } }
     @Published var diskCCCTaskName: String { didSet { defaults.set(diskCCCTaskName.trimmingCharacters(in: .whitespaces), forKey: "diskCCCTaskName") } }
     @Published var bootableCCCTaskName: String { didSet { defaults.set(bootableCCCTaskName.trimmingCharacters(in: .whitespaces), forKey: "bootableCCCTaskName") } }
     @Published var diskBackupVolumePath: String { didSet { defaults.set(diskBackupVolumePath.trimmingCharacters(in: .whitespaces), forKey: "diskBackupVolumePath") } }
@@ -19,9 +19,11 @@ final class BackupSettings: ObservableObject {
 
     init(userDefaults: UserDefaults = .standard) {
         self.defaults = userDefaults
-        self.backupTime        = (userDefaults.object(forKey: "backupTime") as? Date)        ?? Self.time(hour: 23, minute: 0)
-        self.backupReminderTime  = (userDefaults.object(forKey: "backupReminderTime") as? Date)  ?? Self.time(hour: 17, minute: 0)
-        self.preflightWarningTime = (userDefaults.object(forKey: "preflightWarningTime") as? Date) ?? Self.time(hour: 21, minute: 0)
+        self.backupTime              = (userDefaults.object(forKey: "backupTime") as? Date) ?? Self.time(hour: 23, minute: 0)
+        let pf = userDefaults.integer(forKey: "preflightIntervalMinutes")
+        self.preflightIntervalMinutes = pf == 0 ? 30 : pf
+        let rm = userDefaults.integer(forKey: "reminderIntervalMinutes")
+        self.reminderIntervalMinutes  = rm == 0 ? 120 : rm
         self.diskCCCTaskName       = userDefaults.string(forKey: "diskCCCTaskName")       ?? "\(NSUserName()) Backup"
         self.bootableCCCTaskName   = userDefaults.string(forKey: "bootableCCCTaskName")   ?? "\(NSUserName()) Bootable"
         self.diskBackupVolumePath  = userDefaults.string(forKey: "diskBackupVolumePath")  ?? ""
