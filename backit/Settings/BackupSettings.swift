@@ -12,6 +12,8 @@ final class BackupSettings: ObservableObject {
     @Published var diskBackupVolumePath: String { didSet { defaults.set(diskBackupVolumePath.trimmingCharacters(in: .whitespaces), forKey: "diskBackupVolumePath") } }
     @Published var dropboxRemoteName: String { didSet { defaults.set(dropboxRemoteName.trimmingCharacters(in: .whitespaces), forKey: "dropboxRemoteName") } }
     @Published var dropboxVolumePath: String { didSet { defaults.set(dropboxVolumePath.trimmingCharacters(in: .whitespaces), forKey: "dropboxVolumePath") } }
+    @Published var icloudRemoteName: String  { didSet { defaults.set(icloudRemoteName.trimmingCharacters(in: .whitespaces), forKey: "icloudRemoteName") } }
+    @Published var icloudVolumePath: String  { didSet { defaults.set(icloudVolumePath.trimmingCharacters(in: .whitespaces), forKey: "icloudVolumePath") } }
     @Published var historyLimit: Int       { didSet { defaults.set(historyLimit, forKey: "historyLimit") } }
     @Published var storedMachineUUID: String { didSet { defaults.set(storedMachineUUID, forKey: "storedMachineUUID") } }
     @Published var skipTonight: Bool       { didSet { defaults.set(skipTonight, forKey: "skipTonight") } }
@@ -29,6 +31,8 @@ final class BackupSettings: ObservableObject {
         self.diskBackupVolumePath  = userDefaults.string(forKey: "diskBackupVolumePath")  ?? ""
         self.dropboxRemoteName     = userDefaults.string(forKey: "dropboxRemoteName")     ?? "\(NSUserName())-dropbox"
         self.dropboxVolumePath     = userDefaults.string(forKey: "dropboxVolumePath")     ?? "/Volumes/\(NSUserName()) Dropbox Clone"
+        self.icloudRemoteName      = userDefaults.string(forKey: "icloudRemoteName")      ?? ""
+        self.icloudVolumePath      = userDefaults.string(forKey: "icloudVolumePath")      ?? ""
         let limit = userDefaults.integer(forKey: "historyLimit")
         self.historyLimit      = limit == 0 ? 3 : limit
         self.storedMachineUUID = userDefaults.string(forKey: "storedMachineUUID") ?? ""

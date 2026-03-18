@@ -1,8 +1,8 @@
 import Foundation
 @preconcurrency import Combine
 
-final class DropboxJob: BackupJob {
-    let jobType: JobType = .dropbox
+final class ICloudJob: BackupJob {
+    let jobType: JobType = .icloud
     let progress: CurrentValueSubject<JobProgress, Never>
 
     private let remoteName: String
@@ -17,10 +17,9 @@ final class DropboxJob: BackupJob {
     nonisolated(unsafe) private var currentStats = RcloneStats.idle
     nonisolated(unsafe) private(set) var lastLogTimestamp: Date? = nil
     let statsSubject = CurrentValueSubject<RcloneStats, Never>(.idle)
-    // Final stats block text, available after start() returns.
     private(set) var summary: String = ""
 
-    static let logFilePath = "/tmp/backit-rclone.log"
+    static let logFilePath = "/tmp/backit-icloud-rclone.log"
 
     nonisolated static func isInstalled() -> Bool {
         ["/usr/local/bin/rclone", "/opt/homebrew/bin/rclone"].contains {
@@ -44,7 +43,6 @@ final class DropboxJob: BackupJob {
         summary = ""
         currentStats = RcloneStats(status: .running)
         statsSubject.send(currentStats)
-        // Create/truncate log file and open for live writing
         FileManager.default.createFile(atPath: Self.logFilePath, contents: nil)
         logFileHandle = FileHandle(forWritingAtPath: Self.logFilePath)
 
@@ -55,7 +53,7 @@ final class DropboxJob: BackupJob {
         proc.executableURL = URL(fileURLWithPath: rclonePath())
         proc.arguments = [
             "sync", "\(remoteName):", volumePath.trimmingCharacters(in: .whitespaces),
-            "--metadata",
+            "--ignore-size",        // iCloud API reports uncompressed bundle sizes; delivered files are compressed
             "--fast-list",
             "--tpslimit", "12", "--tpslimit-burst", "0",
             "--transfers", "4", "--checkers", "4",
@@ -67,7 +65,6 @@ final class DropboxJob: BackupJob {
         let pipe = Pipe()
         proc.standardError = pipe
 
-        // Capture subjects directly — they're Sendable, avoids main-actor property access
         let progressSubject = self.progress
         let statsRef = self.statsSubject
         pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
@@ -117,7 +114,7 @@ final class DropboxJob: BackupJob {
 
         pipe.fileHandleForReading.readabilityHandler = nil
         // Drain any output buffered in the pipe that the handler didn't process before exit.
-        // Without this, a fast-failing rclone (e.g. transient API error in <2s) produces an empty log.
+        // Without this, a fast-failing rclone (e.g. auth error in <2s) produces an empty log.
         let remaining = pipe.fileHandleForReading.readDataToEndOfFile()
         if !remaining.isEmpty, let text = String(data: remaining, encoding: .utf8) {
             for line in text.components(separatedBy: .newlines) {
@@ -143,8 +140,6 @@ final class DropboxJob: BackupJob {
         logFileHandle = nil
         summary = statsBuffer.joined(separator: "\n")
 
-        // Targeted retry for any files that failed during the main sync.
-        // Skip post-processing entirely if the task was cancelled — avoids spawning new rclone processes.
         guard !Task.isCancelled else { return }
         let persistentlyFailed = await retryFailedPaths(failedPaths)
         guard !Task.isCancelled else { return }
@@ -184,7 +179,6 @@ final class DropboxJob: BackupJob {
             status: .failed))
     }
 
-    // Standalone verify — skips sync, runs only the rclone check phase.
     func verifyOnly() async {
         currentStats = RcloneStats(status: .running)
         currentStats.verifyMode = true
@@ -194,7 +188,6 @@ final class DropboxJob: BackupJob {
         statsSubject.send(currentStats)
     }
 
-    // Verification phase: rclone check --one-way to confirm source matches destination.
     private func runVerification() async {
         killOrphanedRclones(matching: "rclone check")
         progress.send(JobProgress(
@@ -209,12 +202,13 @@ final class DropboxJob: BackupJob {
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: rclonePath())
-        let checkReportPath = "/tmp/backit-check.txt"
+        let checkReportPath = "/tmp/backit-icloud-check.txt"
         FileManager.default.createFile(atPath: checkReportPath, contents: nil)
         proc.arguments = [
             "check",
             "\(remoteName):", volumePath.trimmingCharacters(in: .whitespaces),
             "--one-way",
+            "--ignore-size",        // must match sync: iCloud bundle sizes differ after compression
             "--fast-list",
             "--tpslimit", "12", "--tpslimit-burst", "0",
             "--checkers", "4",
@@ -222,12 +216,10 @@ final class DropboxJob: BackupJob {
             "--combined", checkReportPath
         ]
 
-        // Discard stderr — rclone check produces no useful stderr output
         proc.standardError = Pipe()
 
         guard (try? proc.run()) != nil else { return }
 
-        // Poll the combined file every 2s for live checked-file count
         let pollTask = Task { [weak self] in
             var offset: UInt64 = 0
             while !Task.isCancelled {
@@ -247,7 +239,6 @@ final class DropboxJob: BackupJob {
                             case "-": stats.verifyMissingFromSource += 1
                             case "*": stats.verifyDifferent += 1
                             case "!":
-                                // Don't count 409s as check errors
                                 if !line.contains("too_many_requests") {
                                     stats.verifyCheckErrors += 1
                                 }
@@ -269,7 +260,6 @@ final class DropboxJob: BackupJob {
         }
         pollTask.cancel()
 
-        // Read combined report — lines not starting with '=' are mismatches
         let reportText = (try? String(contentsOfFile: checkReportPath, encoding: .utf8)) ?? ""
         let mismatches = reportText.components(separatedBy: .newlines)
             .filter { !$0.isEmpty && !$0.hasPrefix("=") && !$0.contains("too_many_requests") }
@@ -289,8 +279,6 @@ final class DropboxJob: BackupJob {
         statsSubject.send(currentStats)
     }
 
-    // Cleanup phase: re-sync each directory that had a read error, one at a time.
-    // Ensures no files were missed due to rate-limit-induced directory read failures.
     private func cleanupFailedDirectories(_ dirs: [String]) async {
         guard !dirs.isEmpty else { return }
         let unique = Array(Set(dirs)).sorted()
@@ -307,12 +295,13 @@ final class DropboxJob: BackupJob {
             proc.executableURL = URL(fileURLWithPath: rclonePath())
             proc.arguments = [
                 "sync", "\(remoteName):\(dir)", "\(dest)/\(dir)",
+                "--ignore-size",
                 "--tpslimit", "12", "--tpslimit-burst", "0",
                 "--retries", "2", "--low-level-retries", "2",
                 "--stats", "2s", "--stats-log-level", "NOTICE",
                 "--ignore-errors"
             ]
-            proc.standardError = Pipe()  // discard; errors logged separately
+            proc.standardError = Pipe()
             guard (try? proc.run()) != nil else { continue }
             await withCheckedContinuation { continuation in
                 DispatchQueue.global(qos: .utility).async {
@@ -323,8 +312,6 @@ final class DropboxJob: BackupJob {
         }
     }
 
-    // Runs up to 2 targeted `rclone copy --files-from` passes on failed paths.
-    // Returns paths that still could not be copied after all attempts.
     private func retryFailedPaths(_ paths: [String]) async -> [String] {
         guard !paths.isEmpty else { return [] }
         var remaining = paths
@@ -339,7 +326,7 @@ final class DropboxJob: BackupJob {
                 status: .running))
 
             let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory())
-                .appendingPathComponent("rclone-retry-\(attempt).txt")
+                .appendingPathComponent("rclone-icloud-retry-\(attempt).txt")
             try? remaining.joined(separator: "\n").write(to: tmpURL, atomically: true, encoding: .utf8)
             defer { try? FileManager.default.removeItem(at: tmpURL) }
 
@@ -349,6 +336,7 @@ final class DropboxJob: BackupJob {
                 "copy",
                 "--files-from", tmpURL.path,
                 "\(remoteName):", volumePath.trimmingCharacters(in: .whitespaces),
+                "--ignore-size",
                 "--retries", "1", "--low-level-retries", "1",
                 "--stats", "2s"
             ]
@@ -361,7 +349,6 @@ final class DropboxJob: BackupJob {
                     continuation.resume()
                 }
             }
-            // Read all stderr after exit — avoids concurrent mutation issues
             let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
             let errText = String(data: errData, encoding: .utf8) ?? ""
             remaining = errText.components(separatedBy: .newlines)
@@ -375,7 +362,7 @@ final class DropboxJob: BackupJob {
         killer.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
         killer.arguments = ["-f", pattern]
         try? killer.run()
-        killer.waitUntilExit()  // must complete before we launch a new rclone
+        killer.waitUntilExit()
     }
 
     private func rclonePath() -> String {

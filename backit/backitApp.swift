@@ -9,6 +9,12 @@ struct backitApp: App {
         Settings { EmptyView() }
             .commands {
                 CommandGroup(replacing: .appSettings) { }
+                CommandGroup(replacing: .help) {
+                    Button("backit Help") {
+                        NSApp.sendAction(#selector(AppDelegate.openHelpWindow(_:)), to: nil, from: nil)
+                    }
+                    .keyboardShortcut("/", modifiers: [.command, .shift])
+                }
             }
     }
 }

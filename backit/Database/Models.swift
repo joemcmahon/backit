@@ -5,7 +5,7 @@ enum RunStatus: String {
 }
 
 enum JobType: String {
-    case disk, dropbox, bootable
+    case disk, dropbox, bootable, icloud
 }
 
 enum JobStatus: String {

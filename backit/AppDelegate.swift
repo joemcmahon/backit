@@ -9,6 +9,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     var db: DatabaseManager?
     var launchAgentManager: LaunchAgentManager?
     var mainWindow: NSWindow?
+    var helpWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -70,6 +71,44 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         mainWindow = win
+    }
+
+    // MARK: - Help
+
+    @objc func openHelpWindow(_ sender: Any?) {
+        if let win = helpWindow {
+            win.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let win = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 600),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        win.title = "backit Help"
+        win.isReleasedWhenClosed = false
+
+        let scrollView = NSTextView.scrollableTextView()
+        if let textView = scrollView.documentView as? NSTextView {
+            textView.isEditable = false
+            textView.isSelectable = true
+            textView.textContainerInset = NSSize(width: 20, height: 20)
+            if let data = HelpContent.html.data(using: .utf8),
+               let attrStr = NSAttributedString(
+                   html: data,
+                   options: [.documentType: NSAttributedString.DocumentType.html,
+                             .characterEncoding: String.Encoding.utf8.rawValue],
+                   documentAttributes: nil) {
+                textView.textStorage?.setAttributedString(attrStr)
+            }
+        }
+        win.contentView = scrollView
+        win.center()
+        win.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        helpWindow = win
     }
 
     // MARK: - UNUserNotificationCenterDelegate

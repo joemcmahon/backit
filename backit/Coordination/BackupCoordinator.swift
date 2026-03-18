@@ -8,11 +8,13 @@ final class BackupCoordinator: ObservableObject {
     @Published var currentProgress: JobProgress = .idle
     @Published var cccProgress: JobProgress = .idle
     @Published var dropboxProgress: JobProgress = .idle
+    @Published var icloudProgress: JobProgress = .idle
     @Published var lastRunStatus: RunStatus?
     @Published var lastRunDate: Date?
     @Published var lastRcloneSummary: String?
     @Published var currentJobStartDate: Date?
     @Published var rcloneStats: RcloneStats = .idle
+    @Published var icloudStats: RcloneStats = .idle
 
     private let db: DatabaseManager
     private let settings: BackupSettings
@@ -32,10 +34,15 @@ final class BackupCoordinator: ObservableObject {
         if CCCJob.isInstalled() {
             jobs.append(CCCJob(jobType: .disk, taskName: settings.diskCCCTaskName))
         }
-        if DropboxJob.isInstalled() {
+        if DropboxJob.isInstalled() && !settings.dropboxRemoteName.isEmpty {
             jobs.append(DropboxJob(remoteName: settings.dropboxRemoteName,
                                    volumePath: settings.dropboxVolumePath,
                                    verify: settings.verifyAfterSync))
+        }
+        if ICloudJob.isInstalled() && !settings.icloudRemoteName.isEmpty {
+            jobs.append(ICloudJob(remoteName: settings.icloudRemoteName,
+                                  volumePath: settings.icloudVolumePath,
+                                  verify: settings.verifyAfterSync))
         }
         // Bootable clone task disabled until a real CCC bootable task is configured
         // if CCCJob.isInstalled() {
@@ -52,6 +59,11 @@ final class BackupCoordinator: ObservableObject {
     func runVerifyOnly() {
         guard !isRunning else { return }
         runningTask = Task { await performVerification() }
+    }
+
+    func runSingleJob(_ jobType: JobType) {
+        guard !isRunning else { return }
+        runningTask = Task { await performSingleJob(jobType) }
     }
 
     func recordSkipped() {
@@ -88,6 +100,84 @@ final class BackupCoordinator: ObservableObject {
         runningTask = nil
     }
 
+    func performSingleJob(_ targetType: JobType) async {
+        isRunning = true
+        var run = BackupRun(startedAt: Date(), completedAt: nil,
+                            status: .running,
+                            macosBuild: MacOSVersionDetector.currentBuild())
+        try? db.save(&run)
+        guard let runId = run.id else { isRunning = false; return }
+
+        let allJobs = jobFactory(settings)
+        guard let job = allJobs.first(where: { $0.jobType == targetType }) else {
+            isRunning = false; return
+        }
+
+        currentJobType = job.jobType
+        let jobStart = Date()
+        currentJobStartDate = jobStart
+
+        let progressTask = Task { [weak self] in
+            for await p in job.progress.values {
+                self?.currentProgress = p
+                switch job.jobType {
+                case .disk, .bootable: self?.cccProgress = p
+                case .dropbox:         self?.dropboxProgress = p
+                case .icloud:          self?.icloudProgress = p
+                }
+            }
+        }
+        let statsTask: Task<Void, Never>?
+        if let dropboxJob = job as? DropboxJob {
+            statsTask = Task { [weak self] in
+                for await stats in dropboxJob.statsSubject.values { self?.rcloneStats = stats }
+            }
+        } else if let icloudJob = job as? ICloudJob {
+            statsTask = Task { [weak self] in
+                for await stats in icloudJob.statsSubject.values { self?.icloudStats = stats }
+            }
+        } else {
+            statsTask = nil
+        }
+
+        do { try await job.start() } catch {}
+
+        progressTask.cancel()
+        statsTask?.cancel()
+        if let dropboxJob = job as? DropboxJob {
+            if !dropboxJob.summary.isEmpty { lastRcloneSummary = dropboxJob.summary }
+            if let logTime = dropboxJob.lastLogTimestamp { lastRunDate = logTime }
+        } else if let icloudJob = job as? ICloudJob {
+            if let logTime = icloudJob.lastLogTimestamp { lastRunDate = logTime }
+        }
+
+        let fp = job.progress.value
+        let duration = Int(Date().timeIntervalSince(jobStart))
+        var result = JobResult(runId: runId, jobType: job.jobType,
+                               status: fp.status == .done ? .done : .failed,
+                               bytesTransferred: fp.bytesTransferred,
+                               bytesTotal: fp.bytesTotal,
+                               durationSeconds: duration)
+        try? db.save(&result)
+
+        run.completedAt = Date()
+        run.status = fp.status == .done ? .success : .failed
+        try? db.save(&run)
+
+        lastRunStatus = run.status
+        lastRunDate = Date()
+        isRunning = false
+        currentJobType = nil
+        currentJobStartDate = nil
+        currentProgress = .idle
+        switch targetType {
+        case .disk, .bootable: cccProgress = .idle
+        case .dropbox:         dropboxProgress = .idle; rcloneStats = .idle
+        case .icloud:          icloudProgress = .idle; icloudStats = .idle
+        }
+        runningTask = nil
+    }
+
     // Internal — also called directly by tests
     func performBackup() async {
         isRunning = true
@@ -118,6 +208,7 @@ final class BackupCoordinator: ObservableObject {
             switch job.jobType {
             case .disk, .bootable: cccProgress = waiting
             case .dropbox:         dropboxProgress = waiting
+            case .icloud:          icloudProgress = waiting
             }
         }
 
@@ -134,15 +225,25 @@ final class BackupCoordinator: ObservableObject {
                     switch job.jobType {
                     case .disk, .bootable: self?.cccProgress = p
                     case .dropbox:         self?.dropboxProgress = p
+                    case .icloud:          self?.icloudProgress = p
                     }
                 }
             }
-            let statsTask: Task<Void, Never>? = (job as? DropboxJob).map { dropboxJob in
-                Task { [weak self] in
+            let statsTask: Task<Void, Never>?
+            if let dropboxJob = job as? DropboxJob {
+                statsTask = Task { [weak self] in
                     for await stats in dropboxJob.statsSubject.values {
                         self?.rcloneStats = stats
                     }
                 }
+            } else if let icloudJob = job as? ICloudJob {
+                statsTask = Task { [weak self] in
+                    for await stats in icloudJob.statsSubject.values {
+                        self?.icloudStats = stats
+                    }
+                }
+            } else {
+                statsTask = nil
             }
 
             do {
@@ -156,6 +257,8 @@ final class BackupCoordinator: ObservableObject {
             if let dropboxJob = job as? DropboxJob {
                 if !dropboxJob.summary.isEmpty { lastRcloneSummary = dropboxJob.summary }
                 if let logTime = dropboxJob.lastLogTimestamp { lastRunDate = logTime }
+            } else if let icloudJob = job as? ICloudJob {
+                if let logTime = icloudJob.lastLogTimestamp { lastRunDate = logTime }
             }
             let fp = job.progress.value
             let duration = Int(Date().timeIntervalSince(jobStart))
@@ -191,8 +294,10 @@ final class BackupCoordinator: ObservableObject {
         currentJobStartDate = nil
         cccProgress = .idle
         dropboxProgress = .idle
+        icloudProgress = .idle
         currentProgress = .idle
         rcloneStats = .idle
+        icloudStats = .idle
         runningTask = nil
     }
 }

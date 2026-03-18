@@ -8,6 +8,7 @@ struct BackitMainView: View {
 
     @State private var cccTasks: [CCCTaskEntry] = []
     @State private var rcloneRemotes: [String] = []
+    @State private var rcloneInstalled = false
     @State private var showScheduleSheet = false
     @State private var showRcloneSummary = false
     @State private var showVerifyResults = false
@@ -22,17 +23,37 @@ struct BackitMainView: View {
                 sourcePicker: { AnyView(cccTaskPicker) },
                 destPicker: { AnyView(cccVolumePicker) },
                 progress: coordinator.cccProgress,
-                startDate: coordinator.currentJobType == .disk ? coordinator.currentJobStartDate : nil
+                startDate: coordinator.currentJobType == .disk ? coordinator.currentJobStartDate : nil,
+                isRunning: coordinator.isRunning,
+                onSingleRun: { coordinator.runSingleJob(.disk) }
             )
 
             Divider().padding(.horizontal)
 
-            // rclone section
+            // Dropbox section
             RcloneStatusView(
+                title: "Dropbox (rclone)",
+                customImage: "dropbox-icon",
                 sourcePicker: { AnyView(rcloneRemotePicker) },
                 destPicker: { AnyView(rcloneFolderPicker) },
                 stats: coordinator.rcloneStats,
-                startDate: coordinator.currentJobType == .dropbox ? coordinator.currentJobStartDate : nil
+                startDate: coordinator.currentJobType == .dropbox ? coordinator.currentJobStartDate : nil,
+                isRunning: coordinator.isRunning,
+                onSingleRun: { coordinator.runSingleJob(.dropbox) }
+            )
+
+            Divider().padding(.horizontal)
+
+            // iCloud section
+            RcloneStatusView(
+                title: "iCloud Drive (rclone)",
+                systemImage: "icloud",
+                sourcePicker: { AnyView(icloudRemotePicker) },
+                destPicker: { AnyView(icloudFolderPicker) },
+                stats: coordinator.icloudStats,
+                startDate: coordinator.currentJobType == .icloud ? coordinator.currentJobStartDate : nil,
+                isRunning: coordinator.isRunning,
+                onSingleRun: { coordinator.runSingleJob(.icloud) }
             )
 
             Divider()
@@ -135,16 +156,24 @@ struct BackitMainView: View {
 
     // MARK: - rclone pickers
 
+    @ViewBuilder
     private var rcloneRemotePicker: some View {
-        Menu(settings.dropboxRemoteName.isEmpty ? "Select Remote…" : settings.dropboxRemoteName) {
-            if rcloneRemotes.isEmpty {
-                Text("No remotes found").foregroundColor(.secondary)
+        if !rcloneInstalled {
+            Button("Install rclone…") { openTerminal(command: "brew install rclone") }
+                .frame(maxWidth: .infinity)
+        } else if rcloneRemotes.isEmpty {
+            Button("Set up rclone remote…") { openTerminal(command: "rclone config") }
+                .frame(maxWidth: .infinity)
+        } else {
+            Menu(settings.dropboxRemoteName.isEmpty ? "Select Remote…" : settings.dropboxRemoteName) {
+                ForEach(rcloneRemotes, id: \.self) { remote in
+                    Button(remote) { settings.dropboxRemoteName = remote }
+                }
+                Divider()
+                Button("Add remote…") { openTerminal(command: "rclone config") }
             }
-            ForEach(rcloneRemotes, id: \.self) { remote in
-                Button(remote) { settings.dropboxRemoteName = remote }
-            }
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity)
     }
 
     private var rcloneFolderPicker: some View {
@@ -154,10 +183,40 @@ struct BackitMainView: View {
         .frame(maxWidth: .infinity)
     }
 
+    // MARK: - iCloud pickers
+
+    @ViewBuilder
+    private var icloudRemotePicker: some View {
+        if !rcloneInstalled {
+            Button("Install rclone…") { openTerminal(command: "brew install rclone") }
+                .frame(maxWidth: .infinity)
+        } else if rcloneRemotes.isEmpty {
+            Button("Set up rclone remote…") { openTerminal(command: "rclone config") }
+                .frame(maxWidth: .infinity)
+        } else {
+            Menu(settings.icloudRemoteName.isEmpty ? "Select Remote…" : settings.icloudRemoteName) {
+                ForEach(rcloneRemotes, id: \.self) { remote in
+                    Button(remote) { settings.icloudRemoteName = remote }
+                }
+                Divider()
+                Button("Add remote…") { openTerminal(command: "rclone config") }
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private var icloudFolderPicker: some View {
+        Button(settings.icloudVolumePath.isEmpty ? "Select Folder…" : abbreviatedPath(settings.icloudVolumePath)) {
+            pickFolder { settings.icloudVolumePath = $0 }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
     // MARK: - Helpers
 
     private func loadRemoteData() async {
         cccTasks = await CCCTaskLoader.load()
+        rcloneInstalled = DropboxJob.isInstalled()
         rcloneRemotes = await RcloneRemoteLoader.load()
     }
 
@@ -175,6 +234,12 @@ struct BackitMainView: View {
     private func abbreviatedPath(_ path: String) -> String {
         path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
     }
+
+    private func openTerminal(command: String) {
+        let escaped = command.replacingOccurrences(of: "\"", with: "\\\"")
+        let src = "tell application \"Terminal\"\n  do script \"\(escaped)\"\n  activate\nend tell"
+        NSAppleScript(source: src)?.executeAndReturnError(nil)
+    }
 }
 
 // MARK: - Job section
@@ -186,6 +251,8 @@ struct JobSectionView: View {
     let destPicker: () -> AnyView
     let progress: JobProgress
     var startDate: Date? = nil
+    var isRunning: Bool = false
+    var onSingleRun: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -229,6 +296,12 @@ struct JobSectionView: View {
             }
         }
         .padding()
+        .contextMenu {
+            if let onSingleRun {
+                Button("Run this backup now") { onSingleRun() }
+                    .disabled(isRunning)
+            }
+        }
     }
 
     private var progressLabel: String {
@@ -337,16 +410,33 @@ struct ScheduleSheetView: View {
 // MARK: - Rclone stats panel
 
 struct RcloneStatusView: View {
+    let title: String
+    var systemImage: String = "arrow.triangle.2.circlepath"
+    var customImage: String? = nil
     let sourcePicker: () -> AnyView
     let destPicker: () -> AnyView
     let stats: RcloneStats
     var startDate: Date? = nil
+    var isRunning: Bool = false
+    var onSingleRun: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(stats.verifyMode ? "Dropbox (rclone check)" : "Dropbox (rclone)",
-                  systemImage: stats.verifyMode ? "checkmark.shield" : "arrow.triangle.2.circlepath")
+            if let customImage, !stats.verifyMode {
+                Label {
+                    Text(title)
+                } icon: {
+                    Image(customImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 17, height: 17)
+                }
                 .font(.headline)
+            } else {
+                Label(stats.verifyMode ? "\(title) check" : title,
+                      systemImage: stats.verifyMode ? "checkmark.shield" : systemImage)
+                    .font(.headline)
+            }
 
             HStack(spacing: 8) {
                 sourcePicker()
@@ -403,6 +493,12 @@ struct RcloneStatusView: View {
             }
         }
         .padding()
+        .contextMenu {
+            if let onSingleRun {
+                Button("Run this backup now") { onSingleRun() }
+                    .disabled(isRunning)
+            }
+        }
     }
 
     private func elapsed(from start: Date, to now: Date) -> String {
