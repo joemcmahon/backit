@@ -79,4 +79,56 @@ final class BackupCoordinatorTests: XCTestCase {
         let runs = try db.fetchRecentRuns(limit: 10)
         XCTAssertEqual(runs.first?.status, .partial)
     }
+
+    func testRestoresLastRunDateAndStatusFromDB() async throws {
+        // Insert a completed run directly into the DB
+        var run = BackupRun(id: nil,
+                            startedAt: Date().addingTimeInterval(-3600),
+                            completedAt: Date().addingTimeInterval(-3600),
+                            status: .success,
+                            macosBuild: "24A1")
+        try db.save(&run)
+
+        // Creating a fresh coordinator should pick it up
+        let coordinator = await MainActor.run {
+            BackupCoordinator(db: db, settings: settings) { _ in [] }
+        }
+        let (lastRunDate, lastRunStatus) = await MainActor.run {
+            (coordinator.lastRunDate, coordinator.lastRunStatus)
+        }
+        XCTAssertNotNil(lastRunDate)
+        XCTAssertEqual(lastRunStatus, .success)
+        // Restored date should match what was stored (not a fresh Date())
+        XCTAssertEqual(lastRunDate?.timeIntervalSince1970 ?? 0,
+                       run.completedAt!.timeIntervalSince1970,
+                       accuracy: 1.0)
+    }
+
+    func testDoesNotRestoreInProgressRun() async throws {
+        // Insert a run with no completedAt (crashed mid-backup)
+        var run = BackupRun(id: nil,
+                            startedAt: Date().addingTimeInterval(-60),
+                            completedAt: nil,
+                            status: .running,
+                            macosBuild: "24A1")
+        try db.save(&run)
+
+        let coordinator = await MainActor.run {
+            BackupCoordinator(db: db, settings: settings) { _ in [] }
+        }
+        let (lastRunDate, lastRunStatus) = await MainActor.run {
+            (coordinator.lastRunDate, coordinator.lastRunStatus)
+        }
+        XCTAssertNil(lastRunDate)
+        XCTAssertNil(lastRunStatus)
+    }
+
+    func testIsRunningFalseAfterBackupCompletes() async throws {
+        let coordinator = await MainActor.run {
+            BackupCoordinator(db: db, settings: settings) { _ in [] }
+        }
+        await coordinator.performBackup()
+        let running = await MainActor.run { coordinator.isRunning }
+        XCTAssertFalse(running)
+    }
 }

@@ -38,4 +38,21 @@ final class LaunchAgentManagerTests: XCTestCase {
         let args = plist["ProgramArguments"] as? [String] ?? []
         XCTAssertFalse(args.isEmpty)
     }
+
+    func testInstallEmbedsStartCalendarInterval() throws {
+        // Use a specific known time: 23:15
+        var comps = DateComponents()
+        comps.hour = 23
+        comps.minute = 15
+        let backupTime = Calendar.current.date(from: comps)!
+
+        try sut.install(backupTime: backupTime)
+
+        let data = try Data(contentsOf: plistURL)
+        let plist = try PropertyListSerialization.propertyList(from: data,
+                                                               format: nil) as! [String: Any]
+        let interval = plist["StartCalendarInterval"] as? [String: Int]
+        XCTAssertEqual(interval?["Hour"], 23)
+        XCTAssertEqual(interval?["Minute"], 15)
+    }
 }

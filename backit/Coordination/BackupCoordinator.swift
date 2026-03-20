@@ -20,6 +20,19 @@ final class BackupCoordinator: ObservableObject {
     private let settings: BackupSettings
     private let jobFactory: @MainActor (BackupSettings) -> [any BackupJob]
     private var runningTask: Task<Void, Never>?
+    private var sleepAssertion: NSObjectProtocol?
+
+    private func preventSleep() {
+        guard sleepAssertion == nil else { return }
+        sleepAssertion = ProcessInfo.processInfo.beginActivity(
+            options: .idleSystemSleepDisabled,
+            reason: "Backup in progress"
+        )
+    }
+
+    private func allowSleep() {
+        sleepAssertion = nil  // endActivity called automatically when token deallocates
+    }
 
     init(db: DatabaseManager,
          settings: BackupSettings,
@@ -27,6 +40,15 @@ final class BackupCoordinator: ObservableObject {
         self.db = db
         self.settings = settings
         self.jobFactory = jobFactory
+        restoreLastRun()
+    }
+
+    private func restoreLastRun() {
+        // fetchRecentRuns is a synchronous SQLite read — no async needed here
+        guard let run = try? db.fetchRecentRuns(limit: 1).first,
+              run.completedAt != nil else { return }
+        lastRunDate = run.completedAt
+        lastRunStatus = run.status
     }
 
     static func defaultFactory(_ settings: BackupSettings) -> [any BackupJob] {
@@ -80,6 +102,8 @@ final class BackupCoordinator: ObservableObject {
     }
 
     func performVerification() async {
+        preventSleep()
+        defer { allowSleep() }
         isRunning = true
         rcloneStats = RcloneStats(status: .running)
         currentJobType = .dropbox
@@ -101,6 +125,8 @@ final class BackupCoordinator: ObservableObject {
     }
 
     func performSingleJob(_ targetType: JobType) async {
+        preventSleep()
+        defer { allowSleep() }
         isRunning = true
         var run = BackupRun(startedAt: Date(), completedAt: nil,
                             status: .running,
@@ -180,6 +206,8 @@ final class BackupCoordinator: ObservableObject {
 
     // Internal — also called directly by tests
     func performBackup() async {
+        preventSleep()
+        defer { allowSleep() }
         isRunning = true
         rcloneStats = .idle
 

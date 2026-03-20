@@ -16,16 +16,21 @@ final class LaunchAgentManager {
         agentDirectory.appendingPathComponent("backit.plist")
     }
 
-    func install() throws {
+    func install(backupTime: Date = Date()) throws {
         let execPath = Bundle.main.executablePath ?? "/Applications/backit.app/Contents/MacOS/backit"
         let label = "com.backit.\(NSUserName())"
+        let comps = Calendar.current.dateComponents([.hour, .minute], from: backupTime)
 
         let plist: [String: Any] = [
             "Label": label,
             "ProgramArguments": [execPath],
             "RunAtLoad": true,
             "KeepAlive": false,
-            "ProcessType": "Background"
+            "ProcessType": "Background",
+            "StartCalendarInterval": [
+                "Hour": comps.hour ?? 23,
+                "Minute": comps.minute ?? 0
+            ]
         ]
 
         try FileManager.default.createDirectory(at: agentDirectory,
