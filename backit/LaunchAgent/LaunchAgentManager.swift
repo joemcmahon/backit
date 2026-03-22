@@ -1,6 +1,7 @@
 import Foundation
 
 final class LaunchAgentManager {
+    static let currentPlistVersion = 3
     private let agentDirectory: URL
 
     static var systemAgentDirectory: URL {
@@ -23,14 +24,15 @@ final class LaunchAgentManager {
 
         let plist: [String: Any] = [
             "Label": label,
-            "ProgramArguments": [execPath],
-            "RunAtLoad": true,
+            "ProgramArguments": [execPath, "--headless"],
+            "RunAtLoad": false,
             "KeepAlive": false,
             "ProcessType": "Background",
             "StartCalendarInterval": [
                 "Hour": comps.hour ?? 23,
                 "Minute": comps.minute ?? 0
-            ]
+            ],
+            "BackitPlistVersion": Self.currentPlistVersion
         ]
 
         try FileManager.default.createDirectory(at: agentDirectory,
@@ -48,5 +50,26 @@ final class LaunchAgentManager {
 
     var isInstalled: Bool {
         FileManager.default.fileExists(atPath: plistURL.path)
+    }
+
+    private var installedVersion: Int? {
+        guard let data = try? Data(contentsOf: plistURL),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil)
+                  as? [String: Any] else { return nil }
+        return plist["BackitPlistVersion"] as? Int
+    }
+
+    private var installedExecutablePath: String? {
+        guard let data = try? Data(contentsOf: plistURL),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil)
+                  as? [String: Any],
+              let args = plist["ProgramArguments"] as? [String] else { return nil }
+        return args.first
+    }
+
+    var needsInstall: Bool {
+        !isInstalled
+            || installedVersion != Self.currentPlistVersion
+            || installedExecutablePath != Bundle.main.executablePath
     }
 }

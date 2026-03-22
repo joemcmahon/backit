@@ -22,6 +22,22 @@ final class BackupCoordinator: ObservableObject {
     private var runningTask: Task<Void, Never>?
     private var sleepAssertion: NSObjectProtocol?
 
+    // MARK: - Backup lock file (cross-process mutual exclusion)
+
+    // Written at backup start, removed on completion. Headless instances check this
+    // before running to avoid clobbering an active interactive backup.
+    static let backupLockFile = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("backit-backup.lock")
+
+    private func writeLockFile() {
+        let pid = String(ProcessInfo.processInfo.processIdentifier)
+        try? pid.write(to: Self.backupLockFile, atomically: true, encoding: .utf8)
+    }
+
+    private func removeLockFile() {
+        try? FileManager.default.removeItem(at: Self.backupLockFile)
+    }
+
     private func preventSleep() {
         guard sleepAssertion == nil else { return }
         sleepAssertion = ProcessInfo.processInfo.beginActivity(
@@ -126,7 +142,11 @@ final class BackupCoordinator: ObservableObject {
 
     func performSingleJob(_ targetType: JobType) async {
         preventSleep()
-        defer { allowSleep() }
+        writeLockFile()
+        defer {
+            removeLockFile()
+            allowSleep()
+        }
         isRunning = true
         var run = BackupRun(startedAt: Date(), completedAt: nil,
                             status: .running,
@@ -207,7 +227,11 @@ final class BackupCoordinator: ObservableObject {
     // Internal — also called directly by tests
     func performBackup() async {
         preventSleep()
-        defer { allowSleep() }
+        writeLockFile()
+        defer {
+            removeLockFile()
+            allowSleep()
+        }
         isRunning = true
         rcloneStats = .idle
 

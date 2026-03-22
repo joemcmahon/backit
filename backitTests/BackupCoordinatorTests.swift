@@ -26,6 +26,29 @@ final class MockJob: BackupJob {
     }
 }
 
+final class MockJobWithSideEffect: BackupJob {
+    let jobType: JobType
+    let progress: CurrentValueSubject<JobProgress, Never>
+    private let sideEffect: () -> Void
+
+    init(jobType: JobType, sideEffect: @escaping () -> Void) {
+        self.jobType = jobType
+        self.progress = CurrentValueSubject(.idle)
+        self.sideEffect = sideEffect
+    }
+
+    func start() async throws {
+        sideEffect()
+        progress.send(JobProgress(fraction: 1.0, bytesTransferred: 0,
+                                  bytesTotal: 0, transferRate: "", status: .done))
+    }
+
+    func cancel() {
+        progress.send(JobProgress(fraction: 0, bytesTransferred: 0,
+                                  bytesTotal: 0, transferRate: "", status: .failed))
+    }
+}
+
 final class BackupCoordinatorTests: XCTestCase {
     var db: DatabaseManager!
     var settings: BackupSettings!
@@ -130,5 +153,28 @@ final class BackupCoordinatorTests: XCTestCase {
         await coordinator.performBackup()
         let running = await MainActor.run { coordinator.isRunning }
         XCTAssertFalse(running)
+    }
+
+    func testLockFileRemovedAfterBackup() async throws {
+        let coordinator = await MainActor.run {
+            BackupCoordinator(db: db, settings: settings) { _ in [] }
+        }
+        await coordinator.performBackup()
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: BackupCoordinator.backupLockFile.path),
+            "lock file should be removed after backup completes")
+    }
+
+    func testLockFileExistsDuringBackup() async throws {
+        final class Box: @unchecked Sendable { var value = false }
+        let box = Box()
+        let job = MockJobWithSideEffect(jobType: .disk) {
+            box.value = FileManager.default.fileExists(atPath: BackupCoordinator.backupLockFile.path)
+        }
+        let coordinator = await MainActor.run {
+            BackupCoordinator(db: db, settings: settings) { _ in [job] }
+        }
+        await coordinator.performBackup()
+        XCTAssertTrue(box.value, "lock file should exist while backup is running")
     }
 }

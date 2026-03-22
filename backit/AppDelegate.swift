@@ -12,38 +12,45 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     var mainWindow: NSWindow?
     private var cancellables = Set<AnyCancellable>()
     var helpWindow: NSWindow?
+    var headlessRunner: HeadlessRunner?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
-
-        // Core objects
+        // Core objects needed by both headless and normal launch paths
         let settings = BackupSettings()
         let db = (try? DatabaseManager()) ?? (try! DatabaseManager(inMemory: true))
         let coordinator = BackupCoordinator(db: db, settings: settings)
-        let scheduleManager = ScheduleManager(settings: settings)
-        let launchAgent = LaunchAgentManager()
 
         self.settings = settings
         self.db = db
         self.coordinator = coordinator
+
+        // Headless mode: launched by launchd at backup time — no UI, no screen wake
+        if CommandLine.arguments.contains("--headless") {
+            let runner = HeadlessRunner(db: db, settings: settings, coordinator: coordinator)
+            self.headlessRunner = runner
+            Task { await runner.run() }
+            return
+        }
+
+        // Normal (interactive) launch — full UI
+        NSApp.setActivationPolicy(.regular)
+
+        let scheduleManager = ScheduleManager(settings: settings)
+        let launchAgent = LaunchAgentManager()
         self.scheduleManager = scheduleManager
         self.launchAgentManager = launchAgent
 
-        // Wire schedule → coordinator
         scheduleManager.onBackupTriggered = { coordinator.runBackup() }
         scheduleManager.onBackupSkipped   = { coordinator.recordSkipped() }
 
-        // Notification permission + categories
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
         registerNotificationCategories(center)
 
-        // Main floating window
         showMainWindow()
 
-        // Install launch agent if not already present
-        if !launchAgent.isInstalled { try? launchAgent.install(backupTime: settings.backupTime) }
+        if launchAgent.needsInstall { try? launchAgent.install(backupTime: settings.backupTime) }
 
         settings.$backupTime
             .dropFirst()
@@ -52,12 +59,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             }
             .store(in: &cancellables)
 
-        // If we launched because launchd fired StartCalendarInterval at backup time,
-        // the ScheduleManager timer targets tomorrow. Catch up if backup time was
-        // within the last 5 minutes and no backup has run today.
+        // If launched by launchd at backup time, ScheduleManager targets tomorrow.
+        // Catch up if backup time was within the last 5 minutes and no backup has run today.
         let backupComps = Calendar.current.dateComponents([.hour, .minute], from: settings.backupTime)
-        // Use a 10-minute lookback so nextDate reliably finds today's occurrence;
-        // the inner check narrows acceptance to 5 minutes.
         if let lastFired = Calendar.current.nextDate(
             after: Date().addingTimeInterval(-600),
             matching: backupComps,
@@ -65,7 +69,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             let elapsed = Date().timeIntervalSince(lastFired)
             let noRunToday = coordinator.lastRunDate.map {
                 !Calendar.current.isDateInToday($0)
-            } ?? true  // nil means never run
+            } ?? true
             if elapsed >= 0 && elapsed < 5 * 60 && noRunToday {
                 coordinator.runBackup()
             }
