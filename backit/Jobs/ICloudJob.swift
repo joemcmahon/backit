@@ -19,7 +19,8 @@ final class ICloudJob: BackupJob {
     let statsSubject = CurrentValueSubject<RcloneStats, Never>(.idle)
     private(set) var summary: String = ""
 
-    static let logFilePath = "/tmp/backit-icloud-rclone.log"
+    static var latestLogFilePath = "/tmp/backit-icloud-rclone.log"
+    private(set) var logFilePath: String = "/tmp/backit-icloud-rclone.log"
 
     nonisolated static func isInstalled() -> Bool {
         ["/usr/local/bin/rclone", "/opt/homebrew/bin/rclone"].contains {
@@ -43,8 +44,13 @@ final class ICloudJob: BackupJob {
         summary = ""
         currentStats = RcloneStats(status: .running)
         statsSubject.send(currentStats)
-        FileManager.default.createFile(atPath: Self.logFilePath, contents: nil)
-        logFileHandle = FileHandle(forWritingAtPath: Self.logFilePath)
+        // Create timestamped log file for this run
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyyMMdd-HHmmss"
+        logFilePath = "/tmp/backit-icloud-rclone-\(fmt.string(from: Date())).log"
+        ICloudJob.latestLogFilePath = logFilePath
+        FileManager.default.createFile(atPath: logFilePath, contents: nil)
+        logFileHandle = FileHandle(forWritingAtPath: logFilePath)
 
         progress.send(JobProgress(fraction: 0, bytesTransferred: 0,
                                   bytesTotal: 0, transferRate: "Starting…", status: .running))
@@ -146,6 +152,7 @@ final class ICloudJob: BackupJob {
         await cleanupFailedDirectories(failedDirectories)
         if verify && !Task.isCancelled { await runVerification() }
         let succeeded = proc.terminationStatus == 0 || currentStats.onlyRateLimitErrors
+            || (currentStats.errors > 0 && currentStats.realErrors == 0)
         currentStats.status = (succeeded || !persistentlyFailed.isEmpty) ? .done : .failed
         statsSubject.send(currentStats)
         let rateText: String

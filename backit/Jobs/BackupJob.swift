@@ -28,11 +28,12 @@ struct RcloneStats {
     var bytesTransferred: Int64 = 0
     var errors: Int = 0
     var rateLimitHits: Int = 0   // subset of errors that are 429s
+    var modtimeErrors: Int = 0   // chtimes errors on deleted paths — benign, not transfer failures
     var transferRate: String = ""
     var status: JobStatus = .idle
 
-    var realErrors: Int { max(0, errors - rateLimitHits) }
-    var onlyRateLimitErrors: Bool { errors > 0 && realErrors == 0 }
+    var realErrors: Int { max(0, errors - rateLimitHits - modtimeErrors) }
+    var onlyRateLimitErrors: Bool { rateLimitHits > 0 && realErrors == 0 }
     // Verification result: nil = not run, 0 = verified clean, >0 = differences found
     var verificationDifferences: Int? = nil
     var verificationMismatches: [String] = []

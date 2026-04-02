@@ -15,6 +15,10 @@ final class BackupCoordinator: ObservableObject {
     @Published var currentJobStartDate: Date?
     @Published var rcloneStats: RcloneStats = .idle
     @Published var icloudStats: RcloneStats = .idle
+    @Published var cccLastResult: JobResult? = nil
+    @Published var dropboxLastResult: JobResult? = nil
+    @Published var icloudLastResult: JobResult? = nil
+    @Published var lastRunDuration: TimeInterval? = nil
 
     private let db: DatabaseManager
     private let settings: BackupSettings
@@ -56,15 +60,26 @@ final class BackupCoordinator: ObservableObject {
         self.db = db
         self.settings = settings
         self.jobFactory = jobFactory
+        try? db.cleanupStaleRuns()
         restoreLastRun()
     }
 
     private func restoreLastRun() {
-        // fetchRecentRuns is a synchronous SQLite read — no async needed here
         guard let run = try? db.fetchRecentRuns(limit: 1).first,
               run.completedAt != nil else { return }
         lastRunDate = run.completedAt
         lastRunStatus = run.status
+        let results = (try? db.fetchJobResults(forRun: run.id!)) ?? []
+        for r in results {
+            switch r.jobType {
+            case .disk, .bootable: cccLastResult = r
+            case .dropbox:         dropboxLastResult = r
+            case .icloud:          icloudLastResult = r
+            }
+        }
+        if let end = run.completedAt {
+            lastRunDuration = end.timeIntervalSince(run.startedAt)
+        }
     }
 
     static func defaultFactory(_ settings: BackupSettings) -> [any BackupJob] {
@@ -204,11 +219,18 @@ final class BackupCoordinator: ObservableObject {
                                bytesTransferred: fp.bytesTransferred,
                                bytesTotal: fp.bytesTotal,
                                durationSeconds: duration)
+        result.completedAt = Date()
         try? db.save(&result)
+        switch job.jobType {
+        case .disk, .bootable: cccLastResult = result
+        case .dropbox:         dropboxLastResult = result
+        case .icloud:          icloudLastResult = result
+        }
 
         run.completedAt = Date()
         run.status = fp.status == .done ? .success : .failed
         try? db.save(&run)
+        lastRunDuration = run.completedAt.map { $0.timeIntervalSince(run.startedAt) }
 
         lastRunStatus = run.status
         lastRunDate = Date()
@@ -320,7 +342,13 @@ final class BackupCoordinator: ObservableObject {
                                    bytesTransferred: fp.bytesTransferred,
                                    bytesTotal: fp.bytesTotal,
                                    durationSeconds: duration)
+            result.completedAt = Date()
             try? db.save(&result)
+            switch job.jobType {
+            case .disk, .bootable: cccLastResult = result
+            case .dropbox:         dropboxLastResult = result
+            case .icloud:          icloudLastResult = result
+            }
 
             if fp.status == .done { anySucceeded = true } else { anyFailed = true }
         }
@@ -333,6 +361,7 @@ final class BackupCoordinator: ObservableObject {
         run.completedAt = Date()
         run.status = overallStatus
         try? db.save(&run)
+        lastRunDuration = run.completedAt.map { $0.timeIntervalSince(run.startedAt) }
 
         if settings.storedMachineUUID.isEmpty {
             settings.storedMachineUUID = currentUUID

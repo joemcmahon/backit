@@ -19,6 +19,8 @@ enum RcloneStatsParser {
     nonisolated static func parseError(_ line: String) -> String? {
         guard line.contains("ERROR : ") else { return nil }
         guard !line.contains("error reading source directory") else { return nil }
+        guard !line.contains("failed to set directory modtime") else { return nil }
+        guard !line.contains("failed to set modtime") else { return nil }
         guard let errorRange = line.range(of: "ERROR : ") else { return nil }
         let after = String(line[errorRange.upperBound...])
         guard let colonRange = after.range(of: ": ") else { return nil }
@@ -109,6 +111,14 @@ enum RcloneStatsParser {
         }
         if line.contains("Errors:"), let n = extractErrorCount(line) {
             stats.errors = n
+            return true
+        }
+        // Modtime errors on deleted paths: rclone summary "failed to set directory modtime"
+        // These are benign — all files transferred, rclone just couldn't update dir timestamps.
+        // When this summary appears, all errors at this point are modtime errors.
+        if (line.contains("failed to set directory modtime") || line.contains("failed to set modtime"))
+            && line.contains("no such file or directory") {
+            stats.modtimeErrors = stats.errors
             return true
         }
         return false

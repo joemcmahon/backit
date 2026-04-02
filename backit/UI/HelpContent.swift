@@ -310,10 +310,10 @@ enum HelpContent {
     <h2>rclone Log</h2>
     <p>Full rclone output logs are written during each sync:</p>
     <ul>
-      <li><strong>Dropbox:</strong> <code>/tmp/backit-rclone.log</code></li>
-      <li><strong>iCloud Drive:</strong> <code>/tmp/backit-icloud-rclone.log</code></li>
+      <li><strong>Dropbox:</strong> <code>/tmp/backit-rclone-YYYYMMDD-HHmmss.log</code></li>
+      <li><strong>iCloud Drive:</strong> <code>/tmp/backit-icloud-rclone-YYYYMMDD-HHmmss.log</code></li>
     </ul>
-    <p>After a sync completes, click the <strong>Details</strong> button to see the last 12 lines of the Dropbox log, or open either log file directly for the complete output.</p>
+    <p>Each run writes a new timestamped log file in <code>/tmp/</code>. After a sync completes, click the <strong>Details</strong> button to see the last 12 lines of the Dropbox log, or open the log file directly for the complete output.</p>
 
     <hr>
 

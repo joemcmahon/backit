@@ -92,7 +92,15 @@ final class ScheduleManager: ObservableObject {
         let comps = Calendar.current.dateComponents([.hour, .minute], from: time)
         let fire  = Calendar.current.nextDate(after: Date(), matching: comps,
                                                matchingPolicy: .nextTime) ?? Date()
-        let t = Timer(fire: fire, interval: 86400, repeats: true) { _ in block() }
+        var t: Timer!
+        t = Timer(fire: fire, interval: 0, repeats: false) { [weak self] _ in
+            block()
+            guard let self else { return }
+            let next = self.makeDaily(time: time, block: block)
+            if let idx = self.timers.firstIndex(of: t) {
+                self.timers[idx] = next
+            }
+        }
         RunLoop.main.add(t, forMode: .common)
         return t
     }

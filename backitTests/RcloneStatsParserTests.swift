@@ -36,4 +36,34 @@ final class RcloneStatsParserTests: XCTestCase {
         let count = RcloneStatsParser.extractFileCount(line)
         XCTAssertEqual(count, 5)
     }
+
+    func testModtimeErrorsDetectedFromSummaryLine() {
+        var stats = RcloneStats()
+        // Simulate the Errors: count from the stats block arriving first
+        _ = RcloneStatsParser.updateStats(&stats, from: "Errors:              140")
+        XCTAssertEqual(stats.errors, 140)
+        XCTAssertEqual(stats.modtimeErrors, 0)
+
+        // Then the modtime summary line arrives
+        let summary = "2026/04/02 04:03:17 ERROR : Attempt 1/1 failed with 140 errors and: failed to set directory modtime: 10 errors: last error: chtimes /Volumes/Backup/some/path: no such file or directory"
+        _ = RcloneStatsParser.updateStats(&stats, from: summary)
+        XCTAssertEqual(stats.modtimeErrors, 140)
+        XCTAssertEqual(stats.realErrors, 0)
+        XCTAssertFalse(stats.onlyRateLimitErrors)  // no rate limit hits
+    }
+
+    func testModtimeErrorsNotAddedToFailedPaths() {
+        let line = "2026/04/02 04:03:17 ERROR : Attempt 1/1 failed with 140 errors and: failed to set directory modtime: chtimes /path: no such file or directory"
+        let path = RcloneStatsParser.parseError(line)
+        XCTAssertNil(path, "Modtime error summary should not be treated as a failed file path")
+    }
+
+    func testRealErrorsWithMixedErrors() {
+        var stats = RcloneStats()
+        _ = RcloneStatsParser.updateStats(&stats, from: "Errors:               10")
+        _ = RcloneStatsParser.updateStats(&stats, from: "2026/04/02 ERROR : some/file: failed to copy: some real error")
+        // Only 10 errors, no modtime summary → all real
+        XCTAssertEqual(stats.realErrors, 10)
+        XCTAssertEqual(stats.modtimeErrors, 0)
+    }
 }

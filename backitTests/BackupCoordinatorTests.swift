@@ -127,7 +127,7 @@ final class BackupCoordinatorTests: XCTestCase {
                        accuracy: 1.0)
     }
 
-    func testDoesNotRestoreInProgressRun() async throws {
+    func testCleansUpStaleRunAtStartup() async throws {
         // Insert a run with no completedAt (crashed mid-backup)
         var run = BackupRun(id: nil,
                             startedAt: Date().addingTimeInterval(-60),
@@ -136,14 +136,21 @@ final class BackupCoordinatorTests: XCTestCase {
                             macosBuild: "24A1")
         try db.save(&run)
 
+        // Creating a coordinator should clean up the stale run and restore it as failed
         let coordinator = await MainActor.run {
             BackupCoordinator(db: db, settings: settings) { _ in [] }
         }
         let (lastRunDate, lastRunStatus) = await MainActor.run {
             (coordinator.lastRunDate, coordinator.lastRunStatus)
         }
-        XCTAssertNil(lastRunDate)
-        XCTAssertNil(lastRunStatus)
+        // Stale run is closed out and shown as failed, not silently ignored
+        XCTAssertNotNil(lastRunDate)
+        XCTAssertEqual(lastRunStatus, .failed)
+
+        // Verify the DB record was updated
+        let runs = try db.fetchRecentRuns(limit: 1)
+        XCTAssertNotNil(runs.first?.completedAt)
+        XCTAssertEqual(runs.first?.status, .failed)
     }
 
     func testIsRunningFalseAfterBackupCompletes() async throws {
@@ -176,5 +183,62 @@ final class BackupCoordinatorTests: XCTestCase {
         }
         await coordinator.performBackup()
         XCTAssertTrue(box.value, "lock file should exist while backup is running")
+    }
+
+    func testPerJobLastResultsSetAfterSuccessfulRun() async throws {
+        let diskJob = MockJob(jobType: .disk)
+        let dropboxJob = MockJob(jobType: .dropbox)
+        let coordinator = await MainActor.run {
+            BackupCoordinator(db: db, settings: settings) { _ in [diskJob, dropboxJob] }
+        }
+        await coordinator.performBackup()
+        let cccResult = await MainActor.run { coordinator.cccLastResult }
+        let dropboxResult = await MainActor.run { coordinator.dropboxLastResult }
+        let duration = await MainActor.run { coordinator.lastRunDuration }
+        XCTAssertNotNil(cccResult)
+        XCTAssertEqual(cccResult?.status, .done)
+        XCTAssertNotNil(cccResult?.completedAt)
+        XCTAssertNotNil(dropboxResult)
+        XCTAssertEqual(dropboxResult?.status, .done)
+        XCTAssertNotNil(dropboxResult?.completedAt)
+        XCTAssertNotNil(duration)
+        XCTAssertGreaterThanOrEqual(duration ?? -1, 0)
+    }
+
+    func testPerJobLastResultsSetForFailedJob() async throws {
+        let diskJob = MockJob(jobType: .disk)
+        diskJob.shouldSucceed = false
+        let coordinator = await MainActor.run {
+            BackupCoordinator(db: db, settings: settings) { _ in [diskJob] }
+        }
+        await coordinator.performBackup()
+        let cccResult = await MainActor.run { coordinator.cccLastResult }
+        XCTAssertNotNil(cccResult)
+        XCTAssertEqual(cccResult?.status, .failed)
+        XCTAssertNotNil(cccResult?.completedAt)
+    }
+
+    func testPerJobLastResultsRestoredAtStartup() async throws {
+        // Run a backup to populate the DB
+        let diskJob = MockJob(jobType: .disk)
+        let icloudJob = MockJob(jobType: .icloud)
+        let coordinator1 = await MainActor.run {
+            BackupCoordinator(db: db, settings: settings) { _ in [diskJob, icloudJob] }
+        }
+        await coordinator1.performBackup()
+
+        // Create a fresh coordinator pointing at the same DB (simulates app restart)
+        let coordinator2 = await MainActor.run {
+            BackupCoordinator(db: db, settings: settings) { _ in [] }
+        }
+        let cccResult = await MainActor.run { coordinator2.cccLastResult }
+        let icloudResult = await MainActor.run { coordinator2.icloudLastResult }
+        let duration = await MainActor.run { coordinator2.lastRunDuration }
+        XCTAssertNotNil(cccResult)
+        XCTAssertEqual(cccResult?.status, .done)
+        XCTAssertNotNil(icloudResult)
+        let dropboxResult = await MainActor.run { coordinator2.dropboxLastResult }
+        XCTAssertNil(dropboxResult)  // not in this run
+        XCTAssertNotNil(duration)
     }
 }

@@ -28,6 +28,7 @@ struct JobResult {
     var bytesTransferred: Int64
     var bytesTotal: Int64
     var durationSeconds: Int
+    var completedAt: Date? = nil
 }
 
 struct LogLine {

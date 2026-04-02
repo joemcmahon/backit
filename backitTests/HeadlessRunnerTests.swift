@@ -23,7 +23,7 @@ final class HeadlessRunnerTests: XCTestCase {
             makeJobResult(type: .icloud, status: .done)
         ]
         let body = HeadlessRunner.notificationBody(
-            jobResults: results, lastRunStatus: .success, startedAt: startedAt)
+            jobResults: results, lastRunStatus: .success, completedAt: startedAt)
         XCTAssertTrue(body.contains("succeeded"), "body: \(body)")
         XCTAssertTrue(body.contains("disk clone"), "body: \(body)")
         XCTAssertTrue(body.contains("Dropbox"), "body: \(body)")
@@ -38,7 +38,7 @@ final class HeadlessRunnerTests: XCTestCase {
             makeJobResult(type: .dropbox, status: .done)
         ]
         let body = HeadlessRunner.notificationBody(
-            jobResults: results, lastRunStatus: .partial, startedAt: startedAt)
+            jobResults: results, lastRunStatus: .partial, completedAt: startedAt)
         XCTAssertTrue(body.contains("Dropbox") && body.contains("succeeded"), "body: \(body)")
         XCTAssertTrue(body.contains("disk clone") && body.contains("failed"), "body: \(body)")
     }
@@ -50,21 +50,21 @@ final class HeadlessRunnerTests: XCTestCase {
             makeJobResult(type: .dropbox, status: .failed)
         ]
         let body = HeadlessRunner.notificationBody(
-            jobResults: results, lastRunStatus: .failed, startedAt: startedAt)
+            jobResults: results, lastRunStatus: .failed, completedAt: startedAt)
         XCTAssertFalse(body.contains("succeeded"), "body: \(body)")
     }
 
     func testNotificationBodyNoJobsConfigured() async {
         let startedAt = makeDate(hour: 2, minute: 0)
         let body = HeadlessRunner.notificationBody(
-            jobResults: [], lastRunStatus: .success, startedAt: startedAt)
+            jobResults: [], lastRunStatus: .success, completedAt: startedAt)
         XCTAssertTrue(body.contains("no jobs configured"), "body: \(body)")
     }
 
     func testNotificationBodyIncludesTime() async {
         let startedAt = makeDate(hour: 14, minute: 30)
         let body = HeadlessRunner.notificationBody(
-            jobResults: [], lastRunStatus: .success, startedAt: startedAt)
+            jobResults: [], lastRunStatus: .success, completedAt: startedAt)
         XCTAssertTrue(body.contains("30"), "body should contain minute: \(body)")
     }
 

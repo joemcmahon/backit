@@ -243,10 +243,10 @@ backit records your hardware UUID on first run. If it detects a different UUID (
 
 Full rclone output logs are written during each sync:
 
-- **Dropbox:** `/tmp/backit-rclone.log`
-- **iCloud Drive:** `/tmp/backit-icloud-rclone.log`
+- **Dropbox:** `/tmp/backit-rclone-YYYYMMDD-HHmmss.log`
+- **iCloud Drive:** `/tmp/backit-icloud-rclone-YYYYMMDD-HHmmss.log`
 
-After a sync completes, click the **Details** button to see the last 12 lines of the Dropbox log, or open either log file directly for the complete output.
+Each run writes a new timestamped log file in `/tmp/`. After a sync completes, click the **Details** button to see the last 12 lines of the Dropbox log, or open the log file directly for the complete output.
 
 ---
 

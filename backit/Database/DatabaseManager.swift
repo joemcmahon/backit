@@ -69,6 +69,9 @@ final class DatabaseManager {
         guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
             throw DatabaseError.exec(String(cString: sqlite3_errmsg(db)))
         }
+        // Additive migration: add completedAt to jobResult if not present.
+        // Returns SQLITE_ERROR ("duplicate column name") on re-run — that's expected; ignore it.
+        sqlite3_exec(db, "ALTER TABLE jobResult ADD COLUMN completedAt REAL;", nil, nil, nil)
     }
 
     // MARK: - Save
@@ -108,8 +111,8 @@ final class DatabaseManager {
     func save(_ result: inout JobResult) throws {
         if result.id == nil {
             let sql = """
-            INSERT INTO jobResult (runId, jobType, status, bytesTransferred, bytesTotal, durationSeconds)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO jobResult (runId, jobType, status, bytesTransferred, bytesTotal, durationSeconds, completedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """
             var stmt: OpaquePointer?
             defer { sqlite3_finalize(stmt) }
@@ -120,11 +123,12 @@ final class DatabaseManager {
             sqlite3_bind_int64(stmt, 4, result.bytesTransferred)
             sqlite3_bind_int64(stmt, 5, result.bytesTotal)
             sqlite3_bind_int64(stmt, 6, Int64(result.durationSeconds))
+            bindDouble(stmt, 7, result.completedAt?.timeIntervalSince1970)
             try checkDone(sqlite3_step(stmt))
             result.id = sqlite3_last_insert_rowid(db)
         } else {
             let sql = """
-            UPDATE jobResult SET runId=?, jobType=?, status=?, bytesTransferred=?, bytesTotal=?, durationSeconds=?
+            UPDATE jobResult SET runId=?, jobType=?, status=?, bytesTransferred=?, bytesTotal=?, durationSeconds=?, completedAt=?
             WHERE id=?
             """
             var stmt: OpaquePointer?
@@ -136,7 +140,8 @@ final class DatabaseManager {
             sqlite3_bind_int64(stmt, 4, result.bytesTransferred)
             sqlite3_bind_int64(stmt, 5, result.bytesTotal)
             sqlite3_bind_int64(stmt, 6, Int64(result.durationSeconds))
-            sqlite3_bind_int64(stmt, 7, result.id!)
+            bindDouble(stmt, 7, result.completedAt?.timeIntervalSince1970)
+            sqlite3_bind_int64(stmt, 8, result.id!)
             try checkDone(sqlite3_step(stmt))
         }
     }
@@ -198,7 +203,7 @@ final class DatabaseManager {
 
     func fetchJobResults(forRun runId: Int64) throws -> [JobResult] {
         let sql = """
-        SELECT id, runId, jobType, status, bytesTransferred, bytesTotal, durationSeconds
+        SELECT id, runId, jobType, status, bytesTransferred, bytesTotal, durationSeconds, completedAt
         FROM jobResult WHERE runId=?
         """
         var stmt: OpaquePointer?
@@ -214,9 +219,11 @@ final class DatabaseManager {
             let bytesTransferred = sqlite3_column_int64(stmt, 4)
             let bytesTotal = sqlite3_column_int64(stmt, 5)
             let durationSeconds = Int(sqlite3_column_int64(stmt, 6))
+            let completedAt: Date? = sqlite3_column_type(stmt, 7) == SQLITE_NULL
+                ? nil : Date(timeIntervalSince1970: sqlite3_column_double(stmt, 7))
             rows.append(JobResult(id: id, runId: rId, jobType: jobType, status: status,
                                   bytesTransferred: bytesTransferred, bytesTotal: bytesTotal,
-                                  durationSeconds: durationSeconds))
+                                  durationSeconds: durationSeconds, completedAt: completedAt))
         }
         return rows
     }
@@ -239,6 +246,23 @@ final class DatabaseManager {
             rows.append(LogLine(id: id, jobResultId: jrId, timestamp: timestamp, line: line))
         }
         return rows
+    }
+
+    // MARK: - Stale run cleanup
+
+    /// Marks any run still in "running" state as failed with the current time as completedAt.
+    /// Called at startup — any run left open from a prior process is definitively stale.
+    func cleanupStaleRuns() throws {
+        let sql = """
+        UPDATE backupRun
+        SET completedAt = ?, status = 'failed'
+        WHERE completedAt IS NULL
+        """
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        try checkOK(sqlite3_prepare_v2(db, sql, -1, &stmt, nil))
+        sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970)
+        try checkDone(sqlite3_step(stmt))
     }
 
     // MARK: - Prune

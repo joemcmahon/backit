@@ -25,7 +25,8 @@ struct BackitMainView: View {
                 progress: coordinator.cccProgress,
                 startDate: coordinator.currentJobType == .disk ? coordinator.currentJobStartDate : nil,
                 isRunning: coordinator.isRunning,
-                onSingleRun: { coordinator.runSingleJob(.disk) }
+                onSingleRun: { coordinator.runSingleJob(.disk) },
+                lastResult: coordinator.cccLastResult
             )
 
             Divider().padding(.horizontal)
@@ -39,7 +40,8 @@ struct BackitMainView: View {
                 stats: coordinator.rcloneStats,
                 startDate: coordinator.currentJobType == .dropbox ? coordinator.currentJobStartDate : nil,
                 isRunning: coordinator.isRunning,
-                onSingleRun: { coordinator.runSingleJob(.dropbox) }
+                onSingleRun: { coordinator.runSingleJob(.dropbox) },
+                lastResult: coordinator.dropboxLastResult
             )
 
             Divider().padding(.horizontal)
@@ -53,7 +55,8 @@ struct BackitMainView: View {
                 stats: coordinator.icloudStats,
                 startDate: coordinator.currentJobType == .icloud ? coordinator.currentJobStartDate : nil,
                 isRunning: coordinator.isRunning,
-                onSingleRun: { coordinator.runSingleJob(.icloud) }
+                onSingleRun: { coordinator.runSingleJob(.icloud) },
+                lastResult: coordinator.icloudLastResult
             )
 
             Divider()
@@ -64,7 +67,17 @@ struct BackitMainView: View {
                     if let date = coordinator.lastRunDate, let status = coordinator.lastRunStatus {
                         let fmt = DateFormatter()
                         let _ = { fmt.dateStyle = .medium; fmt.timeStyle = .short }()
-                        Label(fmt.string(from: date),
+                        let dateStr = fmt.string(from: date)
+                        let labelStr: String = {
+                            guard let dur = coordinator.lastRunDuration else { return dateStr }
+                            let total = Int(dur)
+                            let h = total / 3600; let m = (total % 3600) / 60; let s = total % 60
+                            let durStr = h > 0
+                                ? String(format: "%d:%02d:%02d", h, m, s)
+                                : String(format: "%d:%02d", m, s)
+                            return "\(dateStr) · \(durStr) total"
+                        }()
+                        Label(labelStr,
                               systemImage: status == .success ? "checkmark.circle.fill" :
                                            status == .skipped ? "minus.circle.fill" :
                                            "exclamationmark.triangle.fill")
@@ -253,6 +266,7 @@ struct JobSectionView: View {
     var startDate: Date? = nil
     var isRunning: Bool = false
     var onSingleRun: (() -> Void)? = nil
+    var lastResult: JobResult? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -287,6 +301,11 @@ struct JobSectionView: View {
                             .foregroundColor(.secondary)
                             .monospacedDigit()
                     }
+                } else if let result = lastResult, let completedAt = result.completedAt {
+                    Text(completionSummary(result: result, completedAt: completedAt))
+                        .font(.caption2)
+                        .foregroundColor(result.status == .done ? .green : .red)
+                        .monospacedDigit()
                 } else {
                     Text("--:--")
                         .font(.caption2)
@@ -321,6 +340,20 @@ struct JobSectionView: View {
         let sec = s % 60
         if h > 0 { return String(format: "%d:%02d:%02d", h, m, sec) }
         return String(format: "%d:%02d", m, sec)
+    }
+
+    private func completionSummary(result: JobResult, completedAt: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.dateStyle = .short
+        fmt.timeStyle = .medium
+        let label = result.status == .done ? "completed" : "failed"
+        return "\(label) \(fmt.string(from: completedAt)) · \(elapsedFromSeconds(result.durationSeconds))"
+    }
+
+    private func elapsedFromSeconds(_ total: Int) -> String {
+        let h = total / 3600; let m = (total % 3600) / 60; let s = total % 60
+        if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
+        return String(format: "%d:%02d", m, s)
     }
 }
 
@@ -419,6 +452,7 @@ struct RcloneStatusView: View {
     var startDate: Date? = nil
     var isRunning: Bool = false
     var onSingleRun: (() -> Void)? = nil
+    var lastResult: JobResult? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -487,6 +521,11 @@ struct RcloneStatusView: View {
                         Text(elapsed(from: startDate, to: context.date))
                             .font(.caption2).foregroundColor(.secondary).monospacedDigit()
                     }
+                } else if let result = lastResult, let completedAt = result.completedAt {
+                    Text(completionSummary(result: result, completedAt: completedAt))
+                        .font(.caption2)
+                        .foregroundColor(result.status == .done ? .green : .red)
+                        .monospacedDigit()
                 } else {
                     Text("--:--").font(.caption2).foregroundColor(.secondary).monospacedDigit()
                 }
@@ -505,6 +544,20 @@ struct RcloneStatusView: View {
         let s = Int(now.timeIntervalSince(start))
         let h = s / 3600; let m = (s % 3600) / 60; let sec = s % 60
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, sec) : String(format: "%d:%02d", m, sec)
+    }
+
+    private func completionSummary(result: JobResult, completedAt: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.dateStyle = .short
+        fmt.timeStyle = .medium
+        let label = result.status == .done ? "completed" : "failed"
+        return "\(label) \(fmt.string(from: completedAt)) · \(elapsedFromSeconds(result.durationSeconds))"
+    }
+
+    private func elapsedFromSeconds(_ total: Int) -> String {
+        let h = total / 3600; let m = (total % 3600) / 60; let s = total % 60
+        if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
+        return String(format: "%d:%02d", m, s)
     }
 
     private func formatCount(_ n: Int64) -> String {
@@ -553,7 +606,7 @@ struct RcloneSummarySheet: View {
 
             HStack {
                 Button("Open Full Log") {
-                    NSWorkspace.shared.open(URL(fileURLWithPath: DropboxJob.logFilePath))
+                    NSWorkspace.shared.open(URL(fileURLWithPath: DropboxJob.latestLogFilePath))
                 }
                 .buttonStyle(.borderless)
                 Spacer()

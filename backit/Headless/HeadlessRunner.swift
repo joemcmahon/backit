@@ -65,9 +65,10 @@ final class HeadlessRunner {
         let jobResults = recentRun.flatMap { run -> [JobResult]? in
             try? db.fetchJobResults(forRun: run.id!)
         } ?? []
+        let completedAt = recentRun?.completedAt ?? Date()
         let body = Self.notificationBody(jobResults: jobResults,
                                          lastRunStatus: coordinator.lastRunStatus,
-                                         startedAt: startedAt)
+                                         completedAt: completedAt)
         let content = UNMutableNotificationContent()
         content.title = "Backit"
         content.body = body
@@ -80,8 +81,8 @@ final class HeadlessRunner {
     // Static so tests can call it without constructing a full HeadlessRunner
     nonisolated static func notificationBody(jobResults: [JobResult],
                                  lastRunStatus: RunStatus?,
-                                 startedAt: Date) -> String {
-        let timeString = timeFormatter.string(from: startedAt)
+                                 completedAt: Date) -> String {
+        let timeString = timeFormatter.string(from: completedAt)
 
         if jobResults.isEmpty && lastRunStatus == .success {
             return "Backup skipped at \(timeString) — no jobs configured."

@@ -20,7 +20,8 @@ final class DropboxJob: BackupJob {
     // Final stats block text, available after start() returns.
     private(set) var summary: String = ""
 
-    static let logFilePath = "/tmp/backit-rclone.log"
+    static var latestLogFilePath = "/tmp/backit-rclone.log"
+    private(set) var logFilePath: String = "/tmp/backit-rclone.log"
 
     nonisolated static func isInstalled() -> Bool {
         ["/usr/local/bin/rclone", "/opt/homebrew/bin/rclone"].contains {
@@ -44,9 +45,13 @@ final class DropboxJob: BackupJob {
         summary = ""
         currentStats = RcloneStats(status: .running)
         statsSubject.send(currentStats)
-        // Create/truncate log file and open for live writing
-        FileManager.default.createFile(atPath: Self.logFilePath, contents: nil)
-        logFileHandle = FileHandle(forWritingAtPath: Self.logFilePath)
+        // Create timestamped log file for this run
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyyMMdd-HHmmss"
+        logFilePath = "/tmp/backit-rclone-\(fmt.string(from: Date())).log"
+        DropboxJob.latestLogFilePath = logFilePath
+        FileManager.default.createFile(atPath: logFilePath, contents: nil)
+        logFileHandle = FileHandle(forWritingAtPath: logFilePath)
 
         progress.send(JobProgress(fraction: 0, bytesTransferred: 0,
                                   bytesTotal: 0, transferRate: "Starting…", status: .running))
@@ -151,6 +156,7 @@ final class DropboxJob: BackupJob {
         await cleanupFailedDirectories(failedDirectories)
         if verify && !Task.isCancelled { await runVerification() }
         let succeeded = proc.terminationStatus == 0 || currentStats.onlyRateLimitErrors
+            || (currentStats.errors > 0 && currentStats.realErrors == 0)
         currentStats.status = (succeeded || !persistentlyFailed.isEmpty) ? .done : .failed
         statsSubject.send(currentStats)
         let rateText: String

@@ -40,6 +40,50 @@ final class DatabaseTests: XCTestCase {
         XCTAssertNotNil(result.id)
     }
 
+    func testJobResultRoundTripsCompletedAt() throws {
+        var run = BackupRun(startedAt: Date(), completedAt: nil, status: .running, macosBuild: "23F79")
+        try dbManager.save(&run)
+
+        let expected = Date(timeIntervalSince1970: 1_700_000_000)
+        var result = JobResult(
+            runId: run.id!,
+            jobType: .dropbox,
+            status: .done,
+            bytesTransferred: 500,
+            bytesTotal: 500,
+            durationSeconds: 90,
+            completedAt: expected
+        )
+        try dbManager.save(&result)
+
+        let fetched = try dbManager.fetchJobResults(forRun: run.id!)
+        XCTAssertEqual(fetched.count, 1)
+        XCTAssertEqual(
+            fetched[0].completedAt?.timeIntervalSince1970 ?? 0,
+            expected.timeIntervalSince1970,
+            accuracy: 0.001
+        )
+    }
+
+    func testJobResultNilCompletedAtRoundTrips() throws {
+        var run = BackupRun(startedAt: Date(), completedAt: nil, status: .running, macosBuild: "23F79")
+        try dbManager.save(&run)
+
+        var result = JobResult(
+            runId: run.id!,
+            jobType: .disk,
+            status: .done,
+            bytesTransferred: 0,
+            bytesTotal: 0,
+            durationSeconds: 10,
+            completedAt: nil
+        )
+        try dbManager.save(&result)
+
+        let fetched = try dbManager.fetchJobResults(forRun: run.id!)
+        XCTAssertNil(fetched[0].completedAt)
+    }
+
     func testCanInsertLogLine() throws {
         var run = BackupRun(startedAt: Date(), completedAt: nil, status: .running, macosBuild: "23F79")
         try dbManager.save(&run)
