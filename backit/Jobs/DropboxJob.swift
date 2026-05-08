@@ -66,7 +66,13 @@ final class DropboxJob: BackupJob {
             "--transfers", "4", "--checkers", "4",
             "--retries", "1", "--low-level-retries", "1",
             "--ignore-errors",
-            "--stats", "2s", "--stats-log-level", "NOTICE"
+            "--exclude", ".bzvol/**",
+            "--exclude", ".Spotlight-V100/**",
+            "--exclude", ".DocumentRevisions-V100/**",
+            "--exclude", ".TemporaryItems/**",
+            "--exclude", ".Trashes/**",
+            "--stats", "2s", "--stats-log-level", "NOTICE",
+            "--use-json-log"
         ]
 
         let pipe = Pipe()
@@ -155,7 +161,7 @@ final class DropboxJob: BackupJob {
         guard !Task.isCancelled else { return }
         await cleanupFailedDirectories(failedDirectories)
         if verify && !Task.isCancelled { await runVerification() }
-        let succeeded = proc.terminationStatus == 0 || currentStats.onlyRateLimitErrors
+        let succeeded = proc.terminationStatus == 0 || currentStats.onlyRecoverableErrors
             || (currentStats.errors > 0 && currentStats.realErrors == 0)
         currentStats.status = (succeeded || !persistentlyFailed.isEmpty) ? .done : .failed
         statsSubject.send(currentStats)

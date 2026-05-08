@@ -104,7 +104,7 @@ enum HelpContent {
     <p>backit runs two backup tools that you configure separately:</p>
     <ul>
       <li><strong>Carbon Copy Cloner (CCC)</strong> — handles the backup of your internal Mac drive to an external volume</li>
-      <li><strong>rclone</strong> — syncs your Dropbox and iCloud Drive cloud storage to local folders on a backup volume</li>
+      <li><strong>rclone</strong> — syncs your Dropbox cloud storage to a local folder on a backup volume</li>
     </ul>
 
     <hr>
@@ -123,11 +123,6 @@ enum HelpContent {
         <p><strong>Install rclone</strong> via Homebrew:</p>
         <pre>brew install rclone</pre>
         <p><strong>Dropbox remote</strong> — run <code>rclone config</code> and follow the wizard to add a Dropbox remote. The remote name you give it (e.g., <code>my-dropbox</code>) is what you'll select in backit.</p>
-        <p><strong>iCloud Drive remote</strong> — iCloud authentication requires capturing a session cookie from a browser login. The easiest way is the <a href="https://github.com/EvansMatthew97/rclone-icloud-authenticator">rclone-icloud-authenticator</a> tool:</p>
-        <pre>npm install -g rclone-icloud-authenticator
-    rclone-icloud-authenticator</pre>
-        <p>It opens a browser window, walks you through Apple ID login and 2FA, then writes the session cookie into <code>~/.config/rclone/rclone.conf</code> automatically. Give the remote a name (e.g., <code>my-icloud</code>) — that's what you'll select in backit.</p>
-        <p><strong>Cookie expiry:</strong> iCloud session cookies do not auto-refresh. When the cookie expires (typically weeks to months), rclone will start failing with authentication errors. Re-run <code>rclone-icloud-authenticator</code> to capture a fresh cookie and update <code>rclone.conf</code>.</p>
       </li>
       <li><strong>Connect your backup drive</strong> — backit needs the destination volume or volumes to be mounted at backup time. It will alert you if the disk or disks are missing.</li>
     </ol>
@@ -178,16 +173,6 @@ enum HelpContent {
       <li><code>⚠ N difference(s) found</code> — verification found mismatches (see Details)</li>
     </ul>
 
-    <h3>iCloud Drive (rclone) section</h3>
-    <p>Shows the status of your rclone iCloud Drive sync. Works the same as the Dropbox section:</p>
-    <ul>
-      <li><strong>Source dropdown</strong> — select the rclone remote for iCloud (e.g., <code>my-icloud</code>)</li>
-      <li><strong>Destination button</strong> — select the local folder where iCloud Drive will be cloned</li>
-      <li><strong>Live stats, transfer line, and elapsed time</strong> — same as Dropbox section above</li>
-    </ul>
-    <p>iCloud Drive uses <code>--ignore-size</code> on all rclone operations because the iCloud web API reports uncompressed sizes for bundle files (<code>.pages</code>, <code>.numbers</code>, <code>.key</code>, HEIC, etc.) but delivers compressed payloads — rclone would otherwise flag these as mismatches.</p>
-    <p>If iCloud sync starts failing with auth errors, your session cookie has expired. Re-run <code>rclone-icloud-authenticator</code> to refresh it, then restart backit.</p>
-
     <h3>Bottom bar</h3>
     <table>
       <tr><th>Element</th><th>Description</th></tr>
@@ -213,7 +198,7 @@ enum HelpContent {
       <tr><th>Time</th><th>What happens</th></tr>
       <tr><td>8:00 PM</td><td><strong>Reminder</strong> notification — "Backup Tonight at 11:00 PM"</td></tr>
       <tr><td>10:30 PM</td><td><strong>Final check</strong> notification — alerts if your backup drive is still not connected</td></tr>
-      <tr><td>11:00 PM</td><td><strong>Backup runs</strong> — CCC first, then Dropbox, then iCloud Drive</td></tr>
+      <tr><td>11:00 PM</td><td><strong>Backup runs</strong> — CCC first, then Dropbox</td></tr>
     </table>
     <p>The reminder and final check times adjust automatically when you change the backup time or interval settings.</p>
 
@@ -311,17 +296,15 @@ enum HelpContent {
     <p>Full rclone output logs are written during each sync:</p>
     <ul>
       <li><strong>Dropbox:</strong> <code>/tmp/backit-rclone-YYYYMMDD-HHmmss.log</code></li>
-      <li><strong>iCloud Drive:</strong> <code>/tmp/backit-icloud-rclone-YYYYMMDD-HHmmss.log</code></li>
     </ul>
     <p>Each run writes a new timestamped log file in <code>/tmp/</code>. After a sync completes, click the <strong>Details</strong> button to see the last 12 lines of the Dropbox log, or open the log file directly for the complete output.</p>
 
     <hr>
 
-    <h2>Backing up Photos</h2>
-    <p>backit doesn't back up your Photos library directly, but if you use Dropbox you can get your photos covered with no extra tooling.</p>
-    <p>Enable <strong>Camera Uploads</strong> in the Dropbox app (Preferences → Imports → Enable Camera Uploads). Dropbox will upload your photos and videos to a <code>Camera Uploads</code> folder in your Dropbox. Since backit already backs up your Dropbox, those images are included in every rclone sync automatically.</p>
-    <p>Camera Uploads doesn't need to be on all the time. Turning it on periodically — say, once a month — lets Dropbox catch up with any new photos, then you can turn it off again. The next backit run will sync the updated folder to your backup volume.</p>
-    <p>Note that this saves the raw image files only — albums, faces, memories, and other Photos.app metadata are not preserved. For a full Photos library restore, a separate strategy (such as a secondary iCloud Photos library on an external drive) would be needed.</p>
+    <h2>Backing up iCloud Drive and Photos</h2>
+    <p>backit doesn't back up iCloud Drive or your Photos library directly. For full-resolution backups of both, we recommend <strong>Parachute Backup</strong> by Leitmotif GmbH.</p>
+    <p>Parachute Backup downloads your iCloud Drive files and iCloud Photos at full resolution to a local folder, preserving the original quality. It runs independently of backit — just point it at a folder on your backup drive and let it sync on its own schedule.</p>
+    <p>Learn more at <a href="https://parachutebackup.com">parachutebackup.com</a>.</p>
 
     <hr>
 
@@ -345,13 +328,7 @@ enum HelpContent {
     <ul>
       <li>rclone is installed but has no remotes configured yet</li>
       <li>For Dropbox: run <code>rclone config</code> and follow the wizard</li>
-      <li>For iCloud: install and run <code>rclone-icloud-authenticator</code> (see Getting Started)</li>
       <li>Clicking the button will open Terminal with <code>rclone config</code> automatically</li>
-    </ul>
-    <h3>iCloud sync failing with auth or permission errors</h3>
-    <ul>
-      <li>Your iCloud session cookie has expired</li>
-      <li>Re-run <code>rclone-icloud-authenticator</code> to capture a fresh cookie, then restart backit</li>
     </ul>
     <h3>Backup says "skipped" even though drive is connected</h3>
     <ul>

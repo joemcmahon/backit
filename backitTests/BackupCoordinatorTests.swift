@@ -221,9 +221,9 @@ final class BackupCoordinatorTests: XCTestCase {
     func testPerJobLastResultsRestoredAtStartup() async throws {
         // Run a backup to populate the DB
         let diskJob = MockJob(jobType: .disk)
-        let icloudJob = MockJob(jobType: .icloud)
+        let dropboxJob = MockJob(jobType: .dropbox)
         let coordinator1 = await MainActor.run {
-            BackupCoordinator(db: db, settings: settings) { _ in [diskJob, icloudJob] }
+            BackupCoordinator(db: db, settings: settings) { _ in [diskJob, dropboxJob] }
         }
         await coordinator1.performBackup()
 
@@ -232,13 +232,12 @@ final class BackupCoordinatorTests: XCTestCase {
             BackupCoordinator(db: db, settings: settings) { _ in [] }
         }
         let cccResult = await MainActor.run { coordinator2.cccLastResult }
-        let icloudResult = await MainActor.run { coordinator2.icloudLastResult }
+        let dropboxResult = await MainActor.run { coordinator2.dropboxLastResult }
         let duration = await MainActor.run { coordinator2.lastRunDuration }
         XCTAssertNotNil(cccResult)
         XCTAssertEqual(cccResult?.status, .done)
-        XCTAssertNotNil(icloudResult)
-        let dropboxResult = await MainActor.run { coordinator2.dropboxLastResult }
-        XCTAssertNil(dropboxResult)  // not in this run
+        XCTAssertNotNil(dropboxResult)
+        XCTAssertEqual(dropboxResult?.status, .done)
         XCTAssertNotNil(duration)
     }
 }

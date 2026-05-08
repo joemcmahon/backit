@@ -15,14 +15,14 @@ final class HeadlessRunner {
          settings: BackupSettings,
          coordinator: BackupCoordinator,
          settleDelay: Duration = .seconds(30),
-         terminateHandler: @escaping () -> Void = { NSApp.terminate(nil) },
+         terminateHandler: (() -> Void)? = nil,
          notificationPoster: (@Sendable (UNNotificationRequest) async -> Void)? = nil,
          backupRunningChecker: (() -> Bool)? = nil) {
         self.db = db
         self.settings = settings
         self.coordinator = coordinator
         self.settleDelay = settleDelay
-        self.terminateHandler = terminateHandler
+        self.terminateHandler = terminateHandler ?? { NSApp.terminate(nil) }
         self.notificationPoster = notificationPoster ?? { request in
             try? await UNUserNotificationCenter.current().add(request)
         }
@@ -31,16 +31,15 @@ final class HeadlessRunner {
 
     func run() async {
         if backupRunningChecker() {
-            let content = UNMutableNotificationContent()
-            content.title = "Backit"
-            content.body = "Backup already in progress — skipping scheduled headless run."
-            let request = UNNotificationRequest(identifier: "backit.headless.skipped",
-                                                content: content, trigger: nil)
-            await notificationPoster(request)
             terminateHandler()
             return
         }
         try? await Task.sleep(for: settleDelay)
+        // Re-check after settle: another instance may have started during the delay
+        if backupRunningChecker() {
+            terminateHandler()
+            return
+        }
         let startedAt = Date()
         await coordinator.performBackup()
         await postNotification(startedAt: startedAt)
@@ -49,8 +48,11 @@ final class HeadlessRunner {
 
     // Checks whether another backit process is currently running a backup by reading
     // the PID lock file written by BackupCoordinator.performBackup().
+    nonisolated static let backupLockFile = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("backit-backup.lock")
+
     nonisolated static func defaultBackupRunningChecker() -> Bool {
-        guard let data = try? Data(contentsOf: BackupCoordinator.backupLockFile),
+        guard let data = try? Data(contentsOf: backupLockFile),
               let pidStr = String(data: data, encoding: .utf8)?
                   .trimmingCharacters(in: .whitespacesAndNewlines),
               let pid = Int32(pidStr) else { return false }
@@ -110,7 +112,6 @@ final class HeadlessRunner {
         switch type {
         case .disk:     return "disk clone"
         case .dropbox:  return "Dropbox"
-        case .icloud:   return "iCloud"
         case .bootable: return "bootable clone"
         }
     }

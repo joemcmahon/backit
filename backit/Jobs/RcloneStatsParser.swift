@@ -1,69 +1,27 @@
 import Foundation
 
 enum RcloneStatsParser {
-    // Parses a single line from rclone --stats output and returns a progress update if relevant.
-    // Actual rclone output format (IEC units):
-    //   Transferred:   553.658 KiB / 553.658 KiB, 100%, 0 B/s, ETA -
-    //   Transferred:            1 / 1, 100%          ← count line, ignored
-    //   Checks:             30916 / 30916, 100%, Listed 74687
-    //   Elapsed time:      3m47.9s
+
+    // MARK: - JSON log line parsing
+
+    nonisolated private static func parseJSON(_ line: String) -> [String: Any]? {
+        guard let data = line.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return obj
+    }
+
+    // Parses a JSON log line and returns a progress update if it contains a stats object.
     nonisolated static func parseLine(_ line: String) -> JobProgress? {
-        if let p = parseTransferred(line) { return p }
-        if let p = parseChecks(line) { return p }
-        return nil
-    }
+        guard let json = parseJSON(line),
+              let s = json["stats"] as? [String: Any] else { return nil }
 
-    // Extracts the remote-relative path from an rclone file error line.
-    // Format: "... ERROR : path/to/file: Failed to copy: <reason>"
-    // Returns nil if it's a directory error (handled by parseDirectoryError).
-    nonisolated static func parseError(_ line: String) -> String? {
-        guard line.contains("ERROR : ") else { return nil }
-        guard !line.contains("error reading source directory") else { return nil }
-        guard !line.contains("failed to set directory modtime") else { return nil }
-        guard !line.contains("failed to set modtime") else { return nil }
-        guard let errorRange = line.range(of: "ERROR : ") else { return nil }
-        let after = String(line[errorRange.upperBound...])
-        guard let colonRange = after.range(of: ": ") else { return nil }
-        let path = String(after[after.startIndex..<colonRange.lowerBound])
-        return path.isEmpty ? nil : path
-    }
+        let totalBytes = (s["totalBytes"] as? NSNumber)?.int64Value ?? 0
+        let bytes = (s["bytes"] as? NSNumber)?.int64Value ?? 0
+        let listed = (s["listed"] as? NSNumber)?.int64Value ?? 0
+        let speed = (s["speed"] as? NSNumber)?.doubleValue ?? 0
 
-    // Extracts the remote-relative directory path from a directory read error line.
-    // Format: "... ERROR : path/to/dir: error reading source directory: <reason>"
-    nonisolated static func parseDirectoryError(_ line: String) -> String? {
-        guard line.contains("error reading source directory") else { return nil }
-        guard let errorRange = line.range(of: "ERROR : ") else { return nil }
-        let after = String(line[errorRange.upperBound...])
-        guard let colonRange = after.range(of: ": ") else { return nil }
-        let path = String(after[after.startIndex..<colonRange.lowerBound])
-        return path.isEmpty ? nil : path
-    }
-
-    // Transferred:   553.658 KiB / 553.658 KiB, 100%, 45.6 MiB/s, ETA 1m30s
-    // Ignores count lines like "Transferred: 1 / 1, 100%" (no byte unit present)
-    nonisolated private static func parseTransferred(_ line: String) -> JobProgress? {
-        guard line.contains("Transferred:") else { return nil }
-        let fraction = extractPercent(line)
-        let rate = extractRate(line)
-        let (xferred, total) = extractBytes(line)
-        // Only emit if we have actual byte transfer data (total > 0)
-        guard total > 0 else { return nil }
-        return JobProgress(
-            fraction: fraction,
-            bytesTransferred: xferred,
-            bytesTotal: total,
-            transferRate: rate,
-            status: .running)
-    }
-
-    // Checks:   30916 / 30916, 100%, Listed 74687
-    // In incremental runs checks = total (batch complete), but Listed N grows — use that as status.
-    // In full runs Checks: X / Y with X < Y — show as normal progress.
-    nonisolated private static func parseChecks(_ line: String) -> JobProgress? {
-        guard line.contains("Checks:") else { return nil }
-
-        // Try "Listed N" first — indicates scan progress in incremental runs
-        if let listed = extractListed(line) {
+        // Scan phase: no bytes yet, show listed count
+        if totalBytes == 0 && listed > 0 {
             return JobProgress(
                 fraction: 0,
                 bytesTransferred: 0,
@@ -72,57 +30,99 @@ enum RcloneStatsParser {
                 status: .running)
         }
 
-        return nil
+        guard totalBytes > 0 else { return nil }
+
+        return JobProgress(
+            fraction: Double(bytes) / Double(totalBytes),
+            bytesTransferred: bytes,
+            bytesTotal: totalBytes,
+            transferRate: formatSpeed(speed),
+            status: .running)
     }
 
-    // Extracts the timestamp from a rclone log line.
-    // Format: "2026/03/11 17:35:06 NOTICE: ..."
+    // Extracts the remote-relative path from a JSON error log line.
+    nonisolated static func parseError(_ line: String) -> String? {
+        guard let json = parseJSON(line),
+              (json["level"] as? String) == "error" else { return nil }
+        let msg = json["msg"] as? String ?? ""
+        guard !msg.contains("too_many_requests") else { return nil }
+        guard !msg.contains("error reading source directory") else { return nil }
+        guard !msg.contains("failed to set directory modtime") else { return nil }
+        guard !msg.contains("failed to set modtime") else { return nil }
+        guard let path = json["object"] as? String, !path.isEmpty else { return nil }
+        return path
+    }
+
+    // Extracts the remote-relative directory path from a directory read error.
+    nonisolated static func parseDirectoryError(_ line: String) -> String? {
+        guard let json = parseJSON(line),
+              (json["level"] as? String) == "error",
+              let msg = json["msg"] as? String,
+              msg.contains("error reading source directory") else { return nil }
+        guard !msg.contains("too_many_requests") else { return nil }
+        guard let path = json["object"] as? String, !path.isEmpty else { return nil }
+        return path
+    }
+
+    // Parses the ISO 8601 timestamp from a JSON log line.
     nonisolated static func parseTimestamp(_ line: String) -> Date? {
-        let pattern = #"^(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})"#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-              let range = Range(match.range(at: 1), in: line) else { return nil }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy/MM/dd HH:mm:ss"
-        return formatter.date(from: String(line[range]))
+        guard let json = parseJSON(line),
+              let timeStr = json["time"] as? String else { return nil }
+        return parseISO8601(timeStr)
     }
 
-    // Update a RcloneStats struct from a single stderr line. Returns true if something changed.
+    // Update RcloneStats from a JSON log line. Returns true if something changed.
     nonisolated static func updateStats(_ stats: inout RcloneStats, from line: String) -> Bool {
-        if line.contains("too_many_requests") {
-            stats.rateLimitHits += 1
-            return true
-        }
-        if line.contains("Checks:") {
-            if let n = extractListed(line) { stats.listed = n }
-            if let n = extractCheckedCount(line) { stats.checked = n }
-            return true
-        }
-        if line.contains("Transferred:") {
-            let (xferred, total) = extractBytes(line)
-            if total > 0 {
-                stats.bytesTransferred = xferred
-                let rate = extractRate(line)
-                if !rate.isEmpty { stats.transferRate = rate }
-            } else if let n = extractFileCount(line) {
-                stats.filesTransferred = n
+        guard let json = parseJSON(line) else { return false }
+
+        // Stats object — bulk update counters
+        if let s = json["stats"] as? [String: Any] {
+            stats.listed = (s["listed"] as? NSNumber)?.int64Value ?? stats.listed
+            stats.checked = (s["checks"] as? NSNumber)?.int64Value ?? stats.checked
+            stats.filesTransferred = (s["transfers"] as? NSNumber)?.int64Value ?? stats.filesTransferred
+            stats.bytesTransferred = (s["bytes"] as? NSNumber)?.int64Value ?? stats.bytesTransferred
+            stats.errors = (s["errors"] as? NSNumber)?.intValue ?? stats.errors
+            let speed = (s["speed"] as? NSNumber)?.doubleValue ?? 0
+            if speed > 0 { stats.transferRate = formatSpeed(speed) }
+            if let lastErr = s["lastError"] as? String, !lastErr.isEmpty,
+               !lastErr.contains("too_many_requests"),
+               !lastErr.contains("failed to set directory modtime"),
+               !lastErr.contains("failed to set modtime") {
+                stats.lastError = lastErr
             }
             return true
         }
-        if line.contains("Errors:"), let n = extractErrorCount(line) {
-            stats.errors = n
+
+        // Error lines — classify by message content
+        guard (json["level"] as? String) == "error" else { return false }
+        let msg = json["msg"] as? String ?? ""
+
+        if msg.contains("too_many_requests") {
+            stats.rateLimitHits += 1
             return true
         }
-        // Modtime errors on deleted paths: rclone summary "failed to set directory modtime"
-        // These are benign — all files transferred, rclone just couldn't update dir timestamps.
-        // When this summary appears, all errors at this point are modtime errors.
-        if (line.contains("failed to set directory modtime") || line.contains("failed to set modtime"))
-            && line.contains("no such file or directory") {
+
+        if (msg.contains("failed to set directory modtime") || msg.contains("failed to set modtime"))
+            && msg.contains("no such file or directory") {
             stats.modtimeErrors = stats.errors
             return true
         }
-        return false
+
+        if msg.contains("error reading source directory") || msg.contains("march failed") {
+            stats.transientErrors += 1
+            return true
+        }
+
+        // Real error — update lastError
+        if let obj = json["object"] as? String, !obj.isEmpty {
+            stats.lastError = "\(obj): \(msg)"
+        } else {
+            stats.lastError = msg
+        }
+        return true
     }
+
+    // MARK: - Legacy text extractors (retry phase stderr doesn't use --use-json-log)
 
     nonisolated static func extractCheckedCount(_ line: String) -> Int64? {
         let pattern = #"Checks:\s+([\d,]+)"#
@@ -133,9 +133,6 @@ enum RcloneStatsParser {
     }
 
     nonisolated static func extractFileCount(_ line: String) -> Int64? {
-        // Count line: "Transferred:   1 / 1, 100%" — no byte unit
-        let (_, total) = extractBytes(line)
-        guard total == 0 else { return nil }
         let pattern = #"Transferred:\s+([\d,]+)\s*/\s*[\d,]+"#
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
@@ -151,58 +148,26 @@ enum RcloneStatsParser {
         return Int(line[r].replacingOccurrences(of: ",", with: ""))
     }
 
-    nonisolated private static func extractListed(_ line: String) -> Int64? {
-        let pattern = #"Listed\s+([\d,]+)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-              let r = Range(match.range(at: 1), in: line) else { return nil }
-        return Int64(line[r].replacingOccurrences(of: ",", with: ""))
-    }
+    // MARK: - Formatting helpers
 
-    nonisolated private static func extractPercent(_ line: String) -> Double {
-        let pattern = #"(\d+(?:\.\d+)?)%"#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-              let range = Range(match.range(at: 1), in: line) else { return 0 }
-        return (Double(line[range]) ?? 0) / 100.0
-    }
-
-    // Matches IEC rates: 45.6 MiB/s, 0 B/s, 1.2 GiB/s
-    nonisolated private static func extractRate(_ line: String) -> String {
-        let pattern = #"([\d.]+\s*[KMGT]?i?B/s)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-              let range = Range(match.range(at: 1), in: line) else { return "" }
-        return String(line[range])
-    }
-
-    // Matches IEC byte pairs: "553.658 KiB / 553.658 KiB" or "1.234 GiB / 5.678 GiB"
-    nonisolated private static func extractBytes(_ line: String) -> (Int64, Int64) {
-        let pattern = #"([\d.]+)\s*([KMGT]?i?B(?:ytes)?)\s*/\s*([\d.]+)\s*([KMGT]?i?B(?:ytes)?)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-              let r1 = Range(match.range(at: 1), in: line),
-              let r2 = Range(match.range(at: 2), in: line),
-              let r3 = Range(match.range(at: 3), in: line),
-              let r4 = Range(match.range(at: 4), in: line) else { return (0, 0) }
-        let v1 = Double(line[r1]) ?? 0
-        let v2 = Double(line[r3]) ?? 0
-        return (toBytes(v1, unit: String(line[r2])), toBytes(v2, unit: String(line[r4])))
-    }
-
-    nonisolated private static func toBytes(_ value: Double, unit: String) -> Int64 {
-        switch unit {
-        case "TiB", "TBytes": return Int64(value * 1_099_511_627_776)
-        case "GiB", "GBytes": return Int64(value * 1_073_741_824)
-        case "MiB", "MBytes": return Int64(value * 1_048_576)
-        case "KiB", "KBytes": return Int64(value * 1_024)
-        default:               return Int64(value)
-        }
+    nonisolated private static func formatSpeed(_ bytesPerSec: Double) -> String {
+        if bytesPerSec >= 1_073_741_824 { return String(format: "%.1f GiB/s", bytesPerSec / 1_073_741_824) }
+        if bytesPerSec >= 1_048_576 { return String(format: "%.1f MiB/s", bytesPerSec / 1_048_576) }
+        if bytesPerSec >= 1024 { return String(format: "%.1f KiB/s", bytesPerSec / 1024) }
+        return String(format: "%.0f B/s", bytesPerSec)
     }
 
     nonisolated private static func formatCount(_ n: Int64) -> String {
         let fmt = NumberFormatter()
         fmt.numberStyle = .decimal
         return fmt.string(from: NSNumber(value: n)) ?? "\(n)"
+    }
+
+    nonisolated private static func parseISO8601(_ string: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: string) { return date }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: string)
     }
 }

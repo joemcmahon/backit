@@ -19,15 +19,13 @@ final class HeadlessRunnerTests: XCTestCase {
         let startedAt = makeDate(hour: 2, minute: 0)
         let results = [
             makeJobResult(type: .disk, status: .done),
-            makeJobResult(type: .dropbox, status: .done),
-            makeJobResult(type: .icloud, status: .done)
+            makeJobResult(type: .dropbox, status: .done)
         ]
         let body = HeadlessRunner.notificationBody(
             jobResults: results, lastRunStatus: .success, completedAt: startedAt)
         XCTAssertTrue(body.contains("succeeded"), "body: \(body)")
         XCTAssertTrue(body.contains("disk clone"), "body: \(body)")
         XCTAssertTrue(body.contains("Dropbox"), "body: \(body)")
-        XCTAssertTrue(body.contains("iCloud"), "body: \(body)")
         XCTAssertFalse(body.contains("failed"), "body: \(body)")
     }
 
@@ -72,7 +70,6 @@ final class HeadlessRunnerTests: XCTestCase {
 
     func testRunSkipsWhenAnotherInstanceIsBackingUp() async {
         var terminated = false
-        var notificationPosted = false
         let coordinator = await MainActor.run {
             BackupCoordinator(db: db, settings: settings) { _ in [] }
         }
@@ -83,13 +80,12 @@ final class HeadlessRunnerTests: XCTestCase {
                 coordinator: coordinator,
                 settleDelay: .zero,
                 terminateHandler: { terminated = true },
-                notificationPoster: { _ in notificationPosted = true },
+                notificationPoster: { _ in },
                 backupRunningChecker: { true }
             )
         }
         await runner.run()
         XCTAssertTrue(terminated, "should terminate even when skipping")
-        XCTAssertTrue(notificationPosted, "should notify that backup was skipped")
         let runs = try! db.fetchRecentRuns(limit: 10)
         XCTAssertEqual(runs.count, 0, "no backup run should be recorded when skipped")
     }

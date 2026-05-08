@@ -9,7 +9,7 @@ It runs quietly in the background, notifies you before backups, and shows live p
 backit runs two backup tools that you configure separately:
 
 - **Carbon Copy Cloner (CCC)** — handles the backup of your internal Mac drive to an external volume
-- **rclone** — syncs your Dropbox and iCloud Drive cloud storage to local folders on a backup volume
+- **rclone** — syncs your Dropbox cloud storage to a local folder on a backup volume
 
 ---
 
@@ -27,15 +27,6 @@ backit runs two backup tools that you configure separately:
    ```
 
    **Dropbox remote** — run `rclone config` and follow the wizard to add a Dropbox remote. The remote name you give it (e.g., `my-dropbox`) is what you'll select in backit.
-
-   **iCloud Drive remote** — iCloud authentication requires capturing a session cookie from a browser login. The easiest way is the [rclone-icloud-authenticator](https://github.com/EvansMatthew97/rclone-icloud-authenticator) tool:
-   ```
-   npm install -g rclone-icloud-authenticator
-   rclone-icloud-authenticator
-   ```
-   It opens a browser window, walks you through Apple ID login and 2FA, then writes the resulting session cookie into your `~/.config/rclone/rclone.conf` automatically. Give the remote a name (e.g., `my-icloud`) — that's what you'll select in backit.
-
-   > **Cookie expiry:** iCloud session cookies do not auto-refresh. When the cookie expires (typically weeks to months), rclone will start failing with authentication errors. Re-run `rclone-icloud-authenticator` to capture a fresh cookie and update `rclone.conf`.
 
 3. **Connect your backup drive** — backit needs the destination volume or volumes to be mounted at backup time. It will alert you if the disk or disks are missing.
 
@@ -81,18 +72,6 @@ After the sync completes, the status line shows:
 - `Done — N rate limit hit(s)` — Dropbox API rate limits were hit; files were retried
 - `Verified ✓` — verification passed after sync
 - `⚠ N difference(s) found` — verification found mismatches (see Details)
-
-### iCloud Drive (rclone) section
-
-Shows the status of your rclone iCloud Drive sync. Works the same as the Dropbox section:
-
-- **Source dropdown** — select the rclone remote for iCloud (e.g., `my-icloud`)
-- **Destination button** — select the local folder where iCloud Drive will be cloned
-- **Live stats, transfer line, and elapsed time** — same as Dropbox section above
-
-After sync completes, the status messages are the same as Dropbox. iCloud Drive uses `--ignore-size` on all rclone operations because the iCloud web API reports uncompressed sizes for bundle files (`.pages`, `.numbers`, `.key`, HEIC, etc.) but delivers compressed payloads — rclone would otherwise flag these as mismatches.
-
-> **If iCloud sync starts failing with auth errors**, your session cookie has expired. Re-run `rclone-icloud-authenticator` to refresh it, then restart backit.
 
 ### Bottom bar
 
@@ -244,21 +223,18 @@ backit records your hardware UUID on first run. If it detects a different UUID (
 Full rclone output logs are written during each sync:
 
 - **Dropbox:** `/tmp/backit-rclone-YYYYMMDD-HHmmss.log`
-- **iCloud Drive:** `/tmp/backit-icloud-rclone-YYYYMMDD-HHmmss.log`
 
 Each run writes a new timestamped log file in `/tmp/`. After a sync completes, click the **Details** button to see the last 12 lines of the Dropbox log, or open the log file directly for the complete output.
 
 ---
 
-## Backing up Photos
+## Backing up iCloud Drive and Photos
 
-backit doesn't back up your Photos library directly, but if you use Dropbox you can get your photos covered with no extra tooling.
+backit doesn't back up iCloud Drive or your Photos library directly. For full-resolution backups of both, we recommend **Parachute Backup** by Leitmotif GmbH.
 
-Enable **Camera Uploads** in the Dropbox app (Preferences → Imports → Enable Camera Uploads). Dropbox will upload your photos and videos to a `Camera Uploads` folder in your Dropbox. Since backit already backs up your Dropbox, those images are included in every rclone sync automatically.
+Parachute Backup downloads your iCloud Drive files and iCloud Photos at full resolution to a local folder, preserving the original quality. It runs independently of backit — just point it at a folder on your backup drive and let it sync on its own schedule.
 
-Camera Uploads doesn't need to be on all the time. Turning it on periodically — say, once a month — lets Dropbox catch up with any new photos, then you can turn it off again. The next backit run will sync the updated folder to your backup volume.
-
-Note that this saves the raw image files only — albums, faces, memories, and other Photos.app metadata are not preserved. For a full Photos library restore, a separate strategy (such as a secondary iCloud Photos library on an external drive) would be needed.
+Learn more at [parachutebackup.com](https://parachutebackup.com).
 
 ---
 
@@ -272,19 +248,14 @@ Note that this saves the raw image files only — albums, faces, memories, and o
 - Make sure Carbon Copy Cloner is installed at `/Applications/Carbon Copy Cloner.app`
 - Create at least one task in CCC before launching backit
 
-**Dropbox or iCloud remote dropdown shows "Install rclone…"**
+**Dropbox remote dropdown shows "Install rclone…"**
 - Install rclone: `brew install rclone`
 - Relaunch backit after installing
 
-**Dropbox or iCloud remote dropdown shows "Set up rclone remote…"**
+**Dropbox remote dropdown shows "Set up rclone remote…"**
 - rclone is installed but has no remotes configured yet
-- For Dropbox: run `rclone config` and follow the wizard
-- For iCloud: install and run `rclone-icloud-authenticator` (see Getting Started)
+- Run `rclone config` and follow the wizard
 - After adding remotes, click the button — it will open Terminal with `rclone config` automatically
-
-**iCloud sync failing with auth/permission errors**
-- Your iCloud session cookie has expired
-- Re-run `rclone-icloud-authenticator` to capture a fresh cookie, then restart backit
 
 **Backup says "skipped" even though drive is connected**
 - Check that the volume path matches what CCC has configured as the destination

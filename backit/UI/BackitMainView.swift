@@ -44,21 +44,6 @@ struct BackitMainView: View {
                 lastResult: coordinator.dropboxLastResult
             )
 
-            Divider().padding(.horizontal)
-
-            // iCloud section
-            RcloneStatusView(
-                title: "iCloud Drive (rclone)",
-                systemImage: "icloud",
-                sourcePicker: { AnyView(icloudRemotePicker) },
-                destPicker: { AnyView(icloudFolderPicker) },
-                stats: coordinator.icloudStats,
-                startDate: coordinator.currentJobType == .icloud ? coordinator.currentJobStartDate : nil,
-                isRunning: coordinator.isRunning,
-                onSingleRun: { coordinator.runSingleJob(.icloud) },
-                lastResult: coordinator.icloudLastResult
-            )
-
             Divider()
 
             // Bottom bar
@@ -192,35 +177,6 @@ struct BackitMainView: View {
     private var rcloneFolderPicker: some View {
         Button(settings.dropboxVolumePath.isEmpty ? "Select Folder…" : abbreviatedPath(settings.dropboxVolumePath)) {
             pickFolder { settings.dropboxVolumePath = $0 }
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    // MARK: - iCloud pickers
-
-    @ViewBuilder
-    private var icloudRemotePicker: some View {
-        if !rcloneInstalled {
-            Button("Install rclone…") { openTerminal(command: "brew install rclone") }
-                .frame(maxWidth: .infinity)
-        } else if rcloneRemotes.isEmpty {
-            Button("Set up rclone remote…") { openTerminal(command: "rclone config") }
-                .frame(maxWidth: .infinity)
-        } else {
-            Menu(settings.icloudRemoteName.isEmpty ? "Select Remote…" : settings.icloudRemoteName) {
-                ForEach(rcloneRemotes, id: \.self) { remote in
-                    Button(remote) { settings.icloudRemoteName = remote }
-                }
-                Divider()
-                Button("Add remote…") { openTerminal(command: "rclone config") }
-            }
-            .frame(maxWidth: .infinity)
-        }
-    }
-
-    private var icloudFolderPicker: some View {
-        Button(settings.icloudVolumePath.isEmpty ? "Select Folder…" : abbreviatedPath(settings.icloudVolumePath)) {
-            pickFolder { settings.icloudVolumePath = $0 }
         }
         .frame(maxWidth: .infinity)
     }
@@ -499,15 +455,22 @@ struct RcloneStatusView: View {
                     Text("\(formatBytes(stats.bytesTransferred)) · \(stats.transferRate)")
                         .font(.caption2).foregroundColor(.secondary)
                 } else if stats.status == .done {
-                    Text(stats.onlyRateLimitErrors
+                    Text(stats.onlyRecoverableErrors
                          ? "Done — \(stats.rateLimitHits) rate limit hit\(stats.rateLimitHits == 1 ? "" : "s")"
                          : stats.realErrors > 0
-                             ? "Done — \(stats.realErrors) error\(stats.realErrors == 1 ? "" : "s")"
+                             ? (stats.lastError.isEmpty
+                                 ? "Done — \(stats.realErrors) error\(stats.realErrors == 1 ? "" : "s")"
+                                 : "Done — \(stats.lastError)")
                              : "Complete")
                         .font(.caption2)
                         .foregroundColor(stats.realErrors > 0 ? .orange : .secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 } else if stats.status == .failed {
-                    Text("Failed").font(.caption2).foregroundColor(.red)
+                    Text(stats.lastError.isEmpty ? "Failed" : "Failed — \(stats.lastError)")
+                        .font(.caption2).foregroundColor(.red)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 } else if let diff = stats.verificationDifferences, stats.status == .done {
                     Text(diff == 0 ? "Verified ✓" : "⚠ \(diff) difference\(diff == 1 ? "" : "s") found")
                         .font(.caption2)
