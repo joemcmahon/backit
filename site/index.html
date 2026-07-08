@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>backit — automated Mac backups</title>
+  <meta name="description" content="backit automates nightly Carbon Copy Cloner disk backups and Dropbox mirroring via rclone on macOS, with scheduling, reminders, and history.">
+  <link rel="icon" type="image/png" href="assets/favicon-32.png">
+  <link rel="apple-touch-icon" href="assets/icon-180.png">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+  <nav class="site-nav">
+    <div class="wrap">
+      <div class="brand">
+        <img src="assets/icon.png" alt="">
+        backit
+      </div>
+      <div class="nav-links">
+        <a href="#why">Why backit</a>
+        <a href="#features">Features</a>
+        <a href="#requirements">Requirements</a>
+        <a href="https://github.com/joemcmahon/backit/blob/main/docs/user-manual.md">Docs</a>
+        <a class="cta" href="https://github.com/joemcmahon/backit">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="wrap">
+      <img class="icon" src="assets/icon.png" alt="backit app icon">
+      <h1>Automated Mac backups,<br>on autopilot.</h1>
+      <p class="lede">
+        backit runs a nightly Carbon Copy Cloner backup of your internal drive and mirrors your
+        Dropbox to a local volume via rclone — scheduled, monitored, and out of your way.
+      </p>
+      <div class="button-row">
+        <a class="btn btn-primary" href="https://github.com/joemcmahon/backit">View on GitHub</a>
+        <a class="btn btn-secondary" href="https://github.com/joemcmahon/backit/blob/main/docs/user-manual.md">Read the docs</a>
+      </div>
+
+      <div class="screenshot-wrap">
+        <img class="app-screenshot" src="assets/app-screenshot.png"
+             alt="backit main window showing a completed backup run"
+             width="480" height="322">
+      </div>
+    </div>
+  </header>
+
+  <section id="why">
+    <div class="wrap">
+      <h2 class="section-title">Why backit?</h2>
+      <p class="section-lede">
+        Maestral, a popular open-source Dropbox client, is no longer maintained — leaving people
+        who relied on it without a reliable way to keep a local copy of their Dropbox contents.
+        backit isn't a sync client. It uses rclone to talk directly to the Dropbox API and mirror
+        your files down to a local backup volume on a schedule, paired with a scheduled Carbon
+        Copy Cloner run of your internal drive — one tool, two dependable local backups.
+      </p>
+
+      <div class="callout warn">
+        <strong>⚠ This is a backup, not a synced folder</strong>
+        <p>
+          rclone copies one-way, from Dropbox down to the local volume. Don't create, edit, or
+          delete files directly in the local backup copy — nothing you do there is sent back to
+          Dropbox, and any changes will be silently overwritten or deleted on the next run to
+          match whatever is currently in Dropbox. Make your real edits in Dropbox itself.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section id="features" class="alt">
+    <div class="wrap">
+      <h2 class="section-title">What it does</h2>
+      <p class="section-lede">Two independent backup jobs, one scheduler.</p>
+      <div class="grid">
+        <div class="card">
+          <div class="glyph">🖴</div>
+          <h3>Dual backup jobs</h3>
+          <p>A named Carbon Copy Cloner task backs up your internal drive; rclone mirrors your Dropbox to a local volume.</p>
+        </div>
+        <div class="card">
+          <div class="glyph">⏱</div>
+          <h3>Smart scheduling</h3>
+          <p>Reminder, final pre-backup check, and backup time are all configurable — with computed times shown live.</p>
+        </div>
+        <div class="card">
+          <div class="glyph">⏻</div>
+          <h3>Enable jobs independently</h3>
+          <p>Only want one of the two backups? Turn either the CCC or Dropbox job off from Settings.</p>
+        </div>
+        <div class="card">
+          <div class="glyph">▤</div>
+          <h3>Live progress</h3>
+          <p>Byte counts, transfer rate, and elapsed time update as each backup runs, right in the main window.</p>
+        </div>
+        <div class="card">
+          <div class="glyph">🕓</div>
+          <h3>Run history</h3>
+          <p>Every run — and each job's result within it — is recorded to a local SQLite database.</p>
+        </div>
+        <div class="card">
+          <div class="glyph">✓</div>
+          <h3>Post-sync verification</h3>
+          <p>An optional rclone check after each Dropbox sync surfaces drift between source and destination.</p>
+        </div>
+        <div class="card">
+          <div class="glyph">◐</div>
+          <h3>Headless scheduled runs</h3>
+          <p>A LaunchAgent triggers a background run once a day at your configured time — no window required.</p>
+        </div>
+        <div class="card">
+          <div class="glyph">⏭</div>
+          <h3>Skip a night</h3>
+          <p>One click in a notification (or in Settings) defers tonight's run if you're not ready.</p>
+        </div>
+        <div class="card">
+          <div class="glyph">⚠</div>
+          <h3>Disk-missing detection</h3>
+          <p>backit skips silently and notifies you if the backup drive isn't connected at run time.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="requirements">
+    <div class="wrap two-col">
+      <div>
+        <h2 class="section-title" style="text-align: left">Requirements</h2>
+        <ul class="plain">
+          <li>macOS 26.2 or later</li>
+          <li><a href="https://bombich.com">Carbon Copy Cloner</a> — with a task already configured</li>
+          <li><a href="https://rclone.org">rclone</a> — with a Dropbox remote already configured (<code>brew install rclone</code>)</li>
+        </ul>
+      </div>
+      <div>
+        <h2 class="section-title" style="text-align: left">Installation</h2>
+        <p style="color: var(--text-muted); margin-top: 0;">No signed releases yet — build from source with Xcode:</p>
+        <pre>git clone https://github.com/joemcmahon/backit.git
+cd backit
+xcodebuild build -project backit.xcodeproj -scheme backit</pre>
+        <p style="color: var(--text-muted);">Then copy <code>backit.app</code> to <code>/Applications/</code> and launch it.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <p>
+        <a href="https://github.com/joemcmahon/backit">GitHub</a> ·
+        <a href="https://github.com/joemcmahon/backit/blob/main/LICENSE">MIT License</a> ·
+        <a href="https://github.com/joemcmahon/backit/blob/main/docs/user-manual.md">User Manual</a> ·
+        <a href="https://github.com/joemcmahon/backit/blob/main/CONTRIBUTING.md">Contributing</a>
+      </p>
+      <p class="fine">
+        backit is a personal project, provided free with no warranty and no guarantee of support.
+        It is not a substitute for a tested, independent backup strategy — verify your restores,
+        keep more than one backup method, and don't rely on this as your only copy of anything
+        important.
+      </p>
+    </div>
+  </footer>
+
+</body>
+</html>
