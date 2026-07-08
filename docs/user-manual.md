@@ -34,14 +34,14 @@ backit runs two backup tools that you configure separately:
 
 - Launch `backit.app` from your Applications folder.
 - When prompted, grant notification permission. backit uses notifications to remind you before backups and alert you if something goes wrong.
-- The app installs a LaunchAgent at `~/Library/LaunchAgents/com.backit.<username>.plist` — this allows it to start automatically at every login.
+- The app installs a LaunchAgent at `~/Library/LaunchAgents/backit.plist` — this runs backit headless (no window) once a day at your configured backup time. It does not start backit at login.
 - backit will launch and show you its main window; you can now configure your backup.
 
 ---
 
 ## The Main Window
 
-Click on backit in the dock to bring its window to the front; if you've closed it, just clikc on the Dock icon to bring it back.
+Click on backit in the dock to bring its window to the front; if you've closed it, just click on the Dock icon to bring it back.
 
 ### Internal Disk (CCC) section
 
@@ -199,16 +199,16 @@ backit identifies your backup drive by the volume path configured in your CCC ta
 
 ---
 
-## Login Item
+## Scheduled Headless Backup
 
-backit installs itself as a LaunchAgent the first time it runs. This means it starts automatically at every login, without requiring any action from you.
+backit installs itself as a LaunchAgent the first time it runs. This does not start backit at login — instead, launchd launches backit headless (no window, no Dock icon) once a day at your configured backup time, runs the backup, and exits.
 
 The LaunchAgent plist is located at:
 ```
-~/Library/LaunchAgents/com.backit.<username>.plist
+~/Library/LaunchAgents/backit.plist
 ```
 
-To remove the login item without uninstalling the app, delete this file and the app will not restart at login. You can re-enable it by launching the app again manually.
+To remove the scheduled run without uninstalling the app, delete this file. It will be reinstalled the next time you launch the app interactively.
 
 ---
 
@@ -264,8 +264,8 @@ Learn more at [parachutebackup.com](https://parachutebackup.com).
 **Progress bar stuck at 0% / "Scanning…"**
 - CCC scans the source and destination before it starts copying. This can take a few minutes for large volumes. This is normal.
 
-**App doesn't start at login**
-- Check `~/Library/LaunchAgents/com.backit.<username>.plist` exists
+**Scheduled headless backup didn't run**
+- Check `~/Library/LaunchAgents/backit.plist` exists
 - Run `launchctl list | grep backit` in Terminal — if it's not listed, launch the app manually once to reinstall the LaunchAgent
 
 **After rebuilding the app from Xcode, the backup timer doesn't fire**
@@ -275,9 +275,9 @@ Learn more at [parachutebackup.com](https://parachutebackup.com).
 
 ## Uninstalling
 
-1. Quit backit (right-click the menubar icon if available, or use Activity Monitor)
+1. Quit backit (use Activity Monitor if needed)
 2. Delete `/Applications/backit.app`
-3. Delete `~/Library/LaunchAgents/com.backit.<username>.plist`
+3. Delete `~/Library/LaunchAgents/backit.plist`
 
 UserDefaults (settings) will remain until you delete the app's container or run:
 ```

@@ -1,6 +1,16 @@
 # backit
 
-A macOS menubar app that automates daily incremental backups to a local drive (via Carbon Copy Cloner) and Dropbox (via rclone). Runs as a login item and handles scheduling, reminders, progress monitoring, and history.
+A macOS app that automates daily incremental backups to a local drive (via Carbon Copy Cloner) and Dropbox (via rclone). It runs as a normal windowed app when launched interactively, and headless (no window, no Dock icon) when launchd triggers it at your scheduled backup time. Handles scheduling, reminders, progress monitoring, and history.
+
+> **⚠️ Use at your own risk.** backit is a personal project, provided free with no warranty and no guarantee of support (see [LICENSE](LICENSE)). It is not a substitute for a tested, independent backup strategy — verify your restores, keep more than one backup method, and don't rely on this as your only copy of anything important. The author is not liable for data loss, missed backups, or any other damages arising from its use.
+
+## Why backit?
+
+Maestral, a popular open-source Dropbox client, is no longer maintained — leaving people who relied on it without a reliable way to keep a local copy of their Dropbox contents in sync.
+
+backit doesn't try to be a Dropbox sync client. Instead, it uses rclone to talk directly to the Dropbox API and mirror your Dropbox contents down to a local backup volume on a schedule — no Dropbox desktop app (official or third-party) needs to be installed or running. Paired with a scheduled Carbon Copy Cloner run of your internal drive, that gives you a periodic, dependable local backup of both your Mac and your Dropbox files with one tool.
+
+> **⚠️ The local Dropbox copy is a backup, not your Dropbox folder.** rclone copies one-way, from Dropbox down to the local volume — it is not a live, two-way synced folder like Dropbox's own app or Maestral provide. **Don't create, edit, or delete files directly in the local backup copy.** Nothing you do there is sent back up to Dropbox, and anything you change will be silently overwritten or deleted the next time backit runs, to match whatever is currently in Dropbox. Make your real edits in Dropbox itself (web, mobile, or a sync client) — this backup volume exists purely so you have a recent offline copy if Dropbox, your account, or your original files are ever lost.
 
 ## What it does
 
@@ -8,12 +18,12 @@ A macOS menubar app that automates daily incremental backups to a local drive (v
 - Syncs your Dropbox remote to a local backup volume via rclone
 - Sends smart notifications before backups (reminder → final check → backup)
 - Skips silently if your backup drive isn't connected, then notifies you
-- Tracks backup history in a local SQLite database
-- Installs a LaunchAgent so it starts automatically at login
+- Tracks backup history in a local SQLite database, viewable in a Run History window
+- Installs a LaunchAgent that runs the backup headless once a day at your configured time
 
 ## Requirements
 
-- macOS 13 or later
+- macOS 26.2 or later
 - [Carbon Copy Cloner](https://bombich.com) — with a task already configured
 - [rclone](https://rclone.org) — with a Dropbox remote already configured (`brew install rclone`)
 
@@ -24,7 +34,7 @@ Both tools must be configured before backit can run backups. backit provides the
 1. Build and copy `backit.app` to `/Applications/`
 2. Launch the app
 3. Grant notification permission when prompted
-4. The app installs a LaunchAgent automatically — it will start at every login
+4. The app installs a LaunchAgent automatically — it runs headless once a day at your configured backup time (not at login)
 
 ## Configuration
 
@@ -66,7 +76,7 @@ The skip flag resets automatically after the backup window passes. You can still
 
 1. Quit backit
 2. Delete `/Applications/backit.app`
-3. Delete `~/Library/LaunchAgents/com.backit.<username>.plist` to remove the login item
+3. Delete `~/Library/LaunchAgents/backit.plist` to remove the scheduled headless run
 
 ## Development
 

@@ -131,7 +131,7 @@ enum HelpContent {
     <ul>
       <li>Launch <code>backit.app</code> from your Applications folder.</li>
       <li>When prompted, grant notification permission. backit uses notifications to remind you before backups and alert you if something goes wrong.</li>
-      <li>The app installs a LaunchAgent at <code>~/Library/LaunchAgents/com.backit.&lt;username&gt;.plist</code> — this allows it to start automatically at every login.</li>
+      <li>The app installs a LaunchAgent at <code>~/Library/LaunchAgents/backit.plist</code> — this runs backit headless (no window) once a day at your configured backup time. It does not start backit at login.</li>
       <li>backit will launch and show you its main window; you can now configure your backup.</li>
     </ul>
 
@@ -279,11 +279,11 @@ enum HelpContent {
 
     <hr>
 
-    <h2>Login Item</h2>
-    <p>backit installs itself as a LaunchAgent the first time it runs, so it starts automatically at every login.</p>
+    <h2>Scheduled Headless Backup</h2>
+    <p>backit installs itself as a LaunchAgent the first time it runs. This does not start backit at login — instead, launchd launches backit headless (no window, no Dock icon) once a day at your configured backup time, runs the backup, and exits.</p>
     <p>The LaunchAgent plist is located at:</p>
-    <pre>~/Library/LaunchAgents/com.backit.&lt;username&gt;.plist</pre>
-    <p>To remove the login item without uninstalling the app, delete this file. You can re-enable it by launching the app again manually.</p>
+    <pre>~/Library/LaunchAgents/backit.plist</pre>
+    <p>To remove the scheduled run without uninstalling the app, delete this file. It will be reinstalled the next time you launch the app interactively.</p>
 
     <hr>
 
@@ -339,9 +339,9 @@ enum HelpContent {
     <ul>
       <li>CCC scans source and destination before copying. This can take a few minutes for large volumes. This is normal.</li>
     </ul>
-    <h3>App doesn't start at login</h3>
+    <h3>Scheduled headless backup didn't run</h3>
     <ul>
-      <li>Check that <code>~/Library/LaunchAgents/com.backit.&lt;username&gt;.plist</code> exists</li>
+      <li>Check that <code>~/Library/LaunchAgents/backit.plist</code> exists</li>
       <li>Run <code>launchctl list | grep backit</code> in Terminal — if it's not listed, launch the app once to reinstall the LaunchAgent</li>
     </ul>
     <h3>After rebuilding from Xcode, the backup timer doesn't fire</h3>
@@ -355,7 +355,7 @@ enum HelpContent {
     <ol>
       <li>Quit backit (use Activity Monitor if needed)</li>
       <li>Delete <code>/Applications/backit.app</code></li>
-      <li>Delete <code>~/Library/LaunchAgents/com.backit.&lt;username&gt;.plist</code></li>
+      <li>Delete <code>~/Library/LaunchAgents/backit.plist</code></li>
     </ol>
     <p>To remove saved settings:</p>
     <pre>defaults delete com.backit</pre>

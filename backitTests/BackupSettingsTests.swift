@@ -34,4 +34,30 @@ final class BackupSettingsTests: XCTestCase {
     func testDefaultStoredMachineUUIDIsEmpty() {
         XCTAssertEqual(sut.storedMachineUUID, "")
     }
+
+    func testDiskBackupEnabledDefaultsToTrue() {
+        XCTAssertTrue(sut.diskBackupEnabled)
+    }
+
+    func testDropboxBackupEnabledDefaultsToTrue() {
+        XCTAssertTrue(sut.dropboxBackupEnabled)
+    }
+
+    func testDiskBackupEnabledPersists() {
+        let suiteName = UUID().uuidString
+        let defaults = UserDefaults(suiteName: suiteName)!
+        sut = BackupSettings(userDefaults: defaults)
+        sut.diskBackupEnabled = false
+        let reloaded = BackupSettings(userDefaults: defaults)
+        XCTAssertFalse(reloaded.diskBackupEnabled)
+    }
+
+    func testDropboxBackupEnabledPersists() {
+        let suiteName = UUID().uuidString
+        let defaults = UserDefaults(suiteName: suiteName)!
+        sut = BackupSettings(userDefaults: defaults)
+        sut.dropboxBackupEnabled = false
+        let reloaded = BackupSettings(userDefaults: defaults)
+        XCTAssertFalse(reloaded.dropboxBackupEnabled)
+    }
 }

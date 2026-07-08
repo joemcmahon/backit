@@ -340,6 +340,10 @@ struct ScheduleSheetView: View {
 
     var body: some View {
         Form {
+            Section("Jobs") {
+                Toggle("Back up internal disk (CCC)", isOn: $settings.diskBackupEnabled)
+                Toggle("Back up Dropbox (rclone)", isOn: $settings.dropboxBackupEnabled)
+            }
             Section("Schedule") {
                 DatePicker("Backup time", selection: $settings.backupTime,
                            displayedComponents: .hourAndMinute)

@@ -80,10 +80,10 @@ final class BackupCoordinator: ObservableObject {
 
     static func defaultFactory(_ settings: BackupSettings) -> [any BackupJob] {
         var jobs: [any BackupJob] = []
-        if CCCJob.isInstalled() {
+        if settings.diskBackupEnabled && CCCJob.isInstalled() && !settings.diskCCCTaskName.isEmpty {
             jobs.append(CCCJob(jobType: .disk, taskName: settings.diskCCCTaskName))
         }
-        if DropboxJob.isInstalled() && !settings.dropboxRemoteName.isEmpty {
+        if settings.dropboxBackupEnabled && DropboxJob.isInstalled() && !settings.dropboxRemoteName.isEmpty {
             jobs.append(DropboxJob(remoteName: settings.dropboxRemoteName,
                                    volumePath: settings.dropboxVolumePath,
                                    verify: settings.verifyAfterSync))
