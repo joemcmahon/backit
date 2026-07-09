@@ -4,6 +4,17 @@ A macOS app that automates daily incremental backups to a local drive (via Carbo
 
 > **⚠️ Use at your own risk.** backit is a personal project, provided free with no warranty and no guarantee of support (see [LICENSE](LICENSE)). It is not a substitute for a tested, independent backup strategy — verify your restores, keep more than one backup method, and don't rely on this as your only copy of anything important. The author is not liable for data loss, missed backups, or any other damages arising from its use.
 
+# DISCLAIMERS
+
+- **`backit` is meant for experienced users. If you know how to install software and configure it, you'll probably get on all right. If you don't, backit will almost certainly be frustrating for you.**
+- I will respond to questions and try to address problems via GitHub issues as I can. 
+- I don't do realtime 24/7 support. It's just me, with a limited amount of time.
+- You are responsible for anything that happens when you use `backit`. I've not lost data but that doesn't mean it's impossible.
+- `backit` _does not_ back up iCloud files or photos for technical reasons too boring to get into. The excellent [Parachute Backup](https://parachuteapps.com/parachute) does. I use it for those backups. (I tried in `backit`. It was not pretty. The terrible results lurk in the old commits.)
+- `backit` backups have only been tested on local disks, so if you try it to G Drive or OneDrive or wherever else, that unexplored (and unsupported) territory. If you have a breakthrough with one of these, you can certainly open an issue to tell me about it.
+- `backit` is not a substitute for a full local + external backup solution, though it can be part of one.
+- PRs are welcome, but they will absolutely be rejected without a full, passing test suite, and PRs that are "too big" (which is solely at my discretion) will be rejected, period.
+
 ## Why backit?
 
 Maestral, a popular open-source Dropbox client, is no longer maintained — leaving people who relied on it without a reliable way to keep a local copy of their Dropbox contents in sync.
