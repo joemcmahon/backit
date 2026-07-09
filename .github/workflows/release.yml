@@ -1,0 +1,127 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Import signing certificate
+        env:
+          CERTIFICATE_P12: ${{ secrets.SIGNING_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain
+          KEYCHAIN_PASSWORD=$(openssl rand -hex 16)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 900 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          echo "$CERTIFICATE_P12" | base64 --decode -o $RUNNER_TEMP/cert.p12
+          security import $RUNNER_TEMP/cert.p12 \
+            -k "$KEYCHAIN_PATH" \
+            -P "$CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
+          echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD" >> $GITHUB_ENV
+
+      - name: Write App Store Connect API key
+        env:
+          NOTARYTOOL_API_KEY: ${{ secrets.NOTARYTOOL_API_KEY }}
+        run: |
+          mkdir -p $RUNNER_TEMP/private_keys
+          echo "$NOTARYTOOL_API_KEY" | base64 --decode \
+            -o $RUNNER_TEMP/private_keys/AuthKey_${{ secrets.NOTARYTOOL_KEY_ID }}.p8
+
+      - name: Archive
+        run: |
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          xcodebuild archive \
+            -project backit.xcodeproj \
+            -scheme backit \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -archivePath $RUNNER_TEMP/backit.xcarchive \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Developer ID Application" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH"
+
+      - name: Export (Developer ID)
+        run: |
+          cat > $RUNNER_TEMP/ExportOptions.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>developer-id</string>
+              <key>signingStyle</key>
+              <string>manual</string>
+              <key>signingCertificate</key>
+              <string>Developer ID Application</string>
+              <key>stripSwiftSymbols</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          xcodebuild -exportArchive \
+            -archivePath $RUNNER_TEMP/backit.xcarchive \
+            -exportPath $RUNNER_TEMP/export \
+            -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist
+
+      - name: Notarize
+        run: |
+          ditto -c -k --keepParent \
+            $RUNNER_TEMP/export/backit.app \
+            $RUNNER_TEMP/backit-notarize.zip
+          xcrun notarytool submit $RUNNER_TEMP/backit-notarize.zip \
+            --key $RUNNER_TEMP/private_keys/AuthKey_${{ secrets.NOTARYTOOL_KEY_ID }}.p8 \
+            --key-id ${{ secrets.NOTARYTOOL_KEY_ID }} \
+            --issuer ${{ secrets.NOTARYTOOL_ISSUER_ID }} \
+            --wait
+
+      - name: Staple
+        run: xcrun stapler staple $RUNNER_TEMP/export/backit.app
+
+      - name: Zip
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          ditto -c -k --keepParent \
+            $RUNNER_TEMP/export/backit.app \
+            $RUNNER_TEMP/backit-${TAG}.zip
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          gh release create "$TAG" \
+            --title "backit $TAG" \
+            --generate-notes \
+            $RUNNER_TEMP/backit-${TAG}.zip
+
+      - name: Cleanup
+        if: always()
+        run: |
+          security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
+          rm -f $RUNNER_TEMP/cert.p12
+          rm -rf $RUNNER_TEMP/private_keys
