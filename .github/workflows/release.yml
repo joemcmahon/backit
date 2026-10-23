@@ -15,6 +15,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Gate the release on unit tests; UI tests are run locally (see ci.yml).
+      - name: Unit tests
+        run: |
+          xcodebuild test \
+            -project backit.xcodeproj \
+            -scheme backit \
+            -destination 'platform=macOS' \
+            -skip-testing:backitUITests \
+            CODE_SIGNING_ALLOWED=NO
+
       - name: Import signing certificate
         env:
           CERTIFICATE_P12: ${{ secrets.SIGNING_CERTIFICATE_P12 }}

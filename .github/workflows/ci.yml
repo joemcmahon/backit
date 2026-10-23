@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # UI tests are skipped on hosted runners (slow, flaky, blocked by TCC
+      # prompts); run them locally before tagging a release.
+      - name: Unit tests
+        run: |
+          xcodebuild test \
+            -project backit.xcodeproj \
+            -scheme backit \
+            -destination 'platform=macOS' \
+            -skip-testing:backitUITests \
+            CODE_SIGNING_ALLOWED=NO

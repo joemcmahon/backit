@@ -44,18 +44,28 @@ Add one more secret:
 
 ## Cutting a release
 
+Before tagging, run the full test suite locally, including the UI tests (CI and
+the release workflow only run the unit tests):
+
+```bash
+xcodebuild test -project backit.xcodeproj -scheme backit -destination 'platform=macOS'
+```
+
+Then tag and push:
+
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
 ```
 
 The workflow will:
-1. Import the signing certificate into a temporary keychain
-2. `xcodebuild archive` + `xcodebuild -exportArchive` (Developer ID, Release config)
-3. Notarize via `notarytool submit --wait`
-4. Staple the notarization ticket
-5. Zip the `.app` with `ditto` (preserves macOS metadata)
-6. Create a GitHub Release named `backit v1.0.0` with auto-generated notes and attach `backit-v1.0.0.zip`
+1. Run the unit tests (`backitUITests` skipped); a failure stops the release
+2. Import the signing certificate into a temporary keychain
+3. `xcodebuild archive` + `xcodebuild -exportArchive` (Developer ID, Release config)
+4. Notarize via `notarytool submit --wait`
+5. Staple the notarization ticket
+6. Zip the `.app` with `ditto` (preserves macOS metadata)
+7. Create a GitHub Release named `backit v1.0.0` with auto-generated notes and attach `backit-v1.0.0.zip`
 
 The temporary keychain and API key file are deleted at the end regardless of success or failure.
 
