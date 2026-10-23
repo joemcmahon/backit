@@ -7,13 +7,17 @@ branch: main
 repository: backit
 topic: "Signed Developer ID release workflow — notarization debugging in progress"
 tags: [release, codesign, notarization, github-actions, history-squash]
-status: in_progress
-last_updated: 2026-07-09
-last_updated_by: Claude Sonnet 4-6
+status: complete
+last_updated: 2026-10-23
+last_updated_by: Claude Opus 5.5
 type: implementation_strategy
 ---
 
 # Handoff: Signed release workflow — paused for reboot
+
+> **Resolved (2026-10-23):** The re-tag run on 2026-07-09 (Actions run 29039249921) succeeded.
+> v0.0.1 is published with `backit-v0.0.1.zip`; verified locally with `spctl` (Notarized
+> Developer ID) and `stapler validate`. Stale draft releases from failed runs were deleted.
 
 ## What was accomplished this session
 

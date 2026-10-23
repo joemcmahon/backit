@@ -6,3 +6,4 @@ DerivedData/
 .worktrees/
 backit/backit.app/
 .cave/worktrees/
+*.profraw
