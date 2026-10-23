@@ -9,8 +9,11 @@ import XCTest
 
 final class backitUITestsLaunchTests: XCTestCase {
 
+    // Cycling through UI configurations flips the system light/dark appearance,
+    // which can make background agents (e.g. Adobe's AdobeCRDaemon) register and
+    // vanish mid-test; XCTest then waits 120s on them and fails. One run is enough.
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
-        true
+        false
     }
 
     override func setUpWithError() throws {
