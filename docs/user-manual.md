@@ -52,7 +52,7 @@ Shows the status of your rclone Dropbox sync:
 
 After the sync completes, the status line shows:
 - `Complete` — all files synced with no issues
-- `Done — N file(s) skipped` — some files were skipped (usually permission errors)
+- `Done with warnings — some files weren't copied` (orange) — files that should have been copied still failed after retries, or a folder couldn't be fully re-synced. The bottom bar says how many.
 - `Done — N rate limit hit(s)` — Dropbox API rate limits were hit; files were retried
 - `Verified ✓` — verification passed after sync
 - `⚠ N difference(s) found` — verification found mismatches (see Details)
@@ -61,7 +61,7 @@ After the sync completes, the status line shows:
 
 | Element | Description |
 |---------|-------------|
-| Last backup status | ✓ success · ⚠ partial failure · − skipped |
+| Last backup status | ✓ everything copied · ⚠ finished, but some files weren't copied (count shown) · ✗ failed · − skipped |
 | Last backup date | When the last backup ran |
 | Next backup | Scheduled time for the next automatic backup |
 | Details button | Shows the last 12 lines of rclone output + link to full log (appears after rclone runs) |

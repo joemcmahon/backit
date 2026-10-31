@@ -117,13 +117,15 @@ final class DatabaseTests: XCTestCase {
             (2, 200, 210, 'partial', 'A'),
             (3, 300, 310, 'success', 'A'),
             (4, 400, NULL, 'running', 'A'),
-            (5, 500, 510, 'partial', 'A');
+            (5, 500, 510, 'partial', 'A'),
+            (6, 600, 610, 'partial', 'A');
         INSERT INTO jobResult (runId, jobType, status, bytesTransferred, bytesTotal, durationSeconds) VALUES
             (1, 'disk', 'done', 0, 0, 1),
             (2, 'disk', 'failed', 0, 0, 1),
             (2, 'dropbox', 'done', 0, 0, 1),
             (3, 'dropbox', 'done', 0, 0, 1),
-            (5, 'dropbox', 'failed', 0, 0, 1);
+            (5, 'dropbox', 'failed', 0, 0, 1),
+            (6, 'dropbox', 'warning', 0, 0, 1);
         """
         XCTAssertEqual(sqlite3_exec(raw, legacy, nil, nil, nil), SQLITE_OK)
         sqlite3_close(raw)
@@ -132,7 +134,7 @@ final class DatabaseTests: XCTestCase {
         let runIds = try db.fetchRecentRuns(limit: 10).compactMap(\.id).sorted()
         // CCC-only run 1 is gone; mixed run 2 keeps only its Dropbox result;
         // run 4 (no results yet, e.g. in progress elsewhere) is left alone.
-        XCTAssertEqual(runIds, [2, 3, 4, 5])
+        XCTAssertEqual(runIds, [2, 3, 4, 5, 6])
         XCTAssertEqual(try db.fetchJobResults(forRun: 2).map(\.jobType), [.dropbox])
         XCTAssertEqual(try db.fetchJobResults(forRun: 3).map(\.jobType), [.dropbox])
 
@@ -144,6 +146,8 @@ final class DatabaseTests: XCTestCase {
         XCTAssertEqual(statuses[3], .success)
         XCTAssertEqual(statuses[4], .running)
         XCTAssertEqual(statuses[5], .failed)
+        // A Dropbox run that finished with skipped files is legitimately partial.
+        XCTAssertEqual(statuses[6], .partial)
     }
 
     func testOpeningAddsCompletedAtToOldSchema() throws {

@@ -184,7 +184,7 @@ final class BackupCoordinator: ObservableObject {
         let fp = job.progress.value
         let duration = Int(Date().timeIntervalSince(jobStart))
         var result = JobResult(runId: runId, jobType: job.jobType,
-                               status: fp.status == .done ? .done : .failed,
+                               status: Self.recordedStatus(fp.status),
                                bytesTransferred: fp.bytesTransferred,
                                bytesTotal: fp.bytesTotal,
                                durationSeconds: duration)
@@ -194,7 +194,9 @@ final class BackupCoordinator: ObservableObject {
         lastFailureReason = job.failureReason
 
         run.completedAt = Date()
-        run.status = fp.status == .done ? .success : .failed
+        run.status = Self.runStatus(succeeded: fp.status == .done ? 1 : 0,
+                                    warned: fp.status == .warning ? 1 : 0,
+                                    failed: fp.status == .done || fp.status == .warning ? 0 : 1)
         try? db.save(&run)
         lastRunDuration = run.completedAt.map { $0.timeIntervalSince(run.startedAt) }
 
@@ -207,6 +209,18 @@ final class BackupCoordinator: ObservableObject {
         dropboxProgress = .idle
         rcloneStats = .idle
         runningTask = nil
+    }
+
+    /// A job's final status as stored: anything other than done or warning counts as failed.
+    private static func recordedStatus(_ status: JobStatus) -> JobStatus {
+        status == .done || status == .warning ? status : .failed
+    }
+
+    /// Green only when every job copied everything; skipped files or a failed job make it partial.
+    private static func runStatus(succeeded: Int, warned: Int, failed: Int) -> RunStatus {
+        if warned == 0 && failed == 0 { return .success }
+        if succeeded + warned > 0 { return .partial }
+        return .failed
     }
 
     // Internal — also called directly by tests
@@ -236,8 +250,7 @@ final class BackupCoordinator: ObservableObject {
 
         let jobs = jobFactory(settings)
         lastFailureReason = nil
-        var anyFailed = false
-        var anySucceeded = false
+        var succeeded = 0, warned = 0, failed = 0
 
         for job in jobs {
             guard !Task.isCancelled else { break }
@@ -279,7 +292,7 @@ final class BackupCoordinator: ObservableObject {
             let duration = Int(Date().timeIntervalSince(jobStart))
             var result = JobResult(runId: runId,
                                    jobType: job.jobType,
-                                   status: fp.status == .done ? .done : .failed,
+                                   status: Self.recordedStatus(fp.status),
                                    bytesTransferred: fp.bytesTransferred,
                                    bytesTotal: fp.bytesTotal,
                                    durationSeconds: duration)
@@ -288,13 +301,14 @@ final class BackupCoordinator: ObservableObject {
             dropboxLastResult = result
             if let reason = job.failureReason { lastFailureReason = reason }
 
-            if fp.status == .done { anySucceeded = true } else { anyFailed = true }
+            switch fp.status {
+            case .done:    succeeded += 1
+            case .warning: warned += 1
+            default:       failed += 1
+            }
         }
 
-        let overallStatus: RunStatus
-        if jobs.isEmpty || anySucceeded && !anyFailed { overallStatus = .success }
-        else if anySucceeded { overallStatus = .partial }
-        else { overallStatus = .failed }
+        let overallStatus = Self.runStatus(succeeded: succeeded, warned: warned, failed: failed)
 
         run.completedAt = Date()
         run.status = overallStatus

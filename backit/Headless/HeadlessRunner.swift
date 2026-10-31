@@ -97,10 +97,14 @@ final class HeadlessRunner {
         }
 
         let succeeded = jobResults.filter { $0.status == .done }.map { jobName($0.jobType) }
-        let failed    = jobResults.filter { $0.status != .done }.map { jobName($0.jobType) }
+        let warned    = jobResults.filter { $0.status == .warning }.map { jobName($0.jobType) }
+        let failed    = jobResults.filter { $0.status != .done && $0.status != .warning }.map { jobName($0.jobType) }
 
         let reason = failureReason.map { " \($0)." } ?? ""
-        if failed.isEmpty {
+        if !warned.isEmpty && failed.isEmpty && succeeded.isEmpty {
+            return "Backup completed with warnings at \(timeString) — \(listString(warned)):\(reason.isEmpty ? " some files weren't copied." : reason)"
+        }
+        if failed.isEmpty && warned.isEmpty {
             return "Backup completed at \(timeString) — \(listString(succeeded)) succeeded."
         } else if succeeded.isEmpty {
             return "Backup failed at \(timeString) — \(listString(failed)) failed.\(reason)"

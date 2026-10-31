@@ -43,6 +43,18 @@ final class HeadlessRunnerTests: XCTestCase {
         XCTAssertTrue(body.contains("Backup volume is full"), "body: \(body)")
     }
 
+    func testNotificationBodyForSkippedFilesIsAWarning() async {
+        let results = [makeJobResult(type: .dropbox, status: .warning)]
+        let body = HeadlessRunner.notificationBody(
+            jobResults: results, lastRunStatus: .partial,
+            completedAt: makeDate(hour: 1, minute: 12),
+            failureReason: "3 files couldn't be copied")
+        XCTAssertTrue(body.contains("with warnings"), "body: \(body)")
+        XCTAssertTrue(body.contains("3 files couldn't be copied"), "body: \(body)")
+        XCTAssertFalse(body.contains("succeeded"), "body: \(body)")
+        XCTAssertFalse(body.contains("failed"), "body: \(body)")
+    }
+
     func testNotificationBodyNoJobsConfigured() async {
         let startedAt = makeDate(hour: 2, minute: 0)
         let body = HeadlessRunner.notificationBody(

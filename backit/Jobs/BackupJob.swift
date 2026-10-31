@@ -55,7 +55,7 @@ struct RcloneStats {
 protocol BackupJob: AnyObject {
     var jobType: JobType { get }
     var progress: CurrentValueSubject<JobProgress, Never> { get }
-    /// Why the last run failed, when there's something more useful to say than "failed".
+    /// Why the last run failed or finished with a warning, when there's more to say than its status.
     var failureReason: String? { get }
     func start() async throws
     func cancel()

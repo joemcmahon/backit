@@ -50,9 +50,11 @@ struct BackitMainView: View {
                         Label(labelStr,
                               systemImage: status == .success ? "checkmark.circle.fill" :
                                            status == .skipped ? "minus.circle.fill" :
+                                           status == .failed ? "xmark.circle.fill" :
                                            "exclamationmark.triangle.fill")
                             .foregroundColor(status == .success ? .green :
-                                             status == .skipped ? .secondary : .orange)
+                                             status == .skipped ? .secondary :
+                                             status == .failed ? .red : .orange)
                             .font(.caption)
                     } else {
                         Text("No backup yet").font(.caption).foregroundColor(.secondary)
@@ -330,6 +332,11 @@ struct RcloneStatusView: View {
                         .foregroundColor(stats.realErrors > 0 ? .orange : .secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                } else if stats.status == .warning {
+                    Text("Done with warnings — some files weren't copied")
+                        .font(.caption2).foregroundColor(.orange)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 } else if stats.status == .failed {
                     Text(stats.lastError.isEmpty ? "Failed" : "Failed — \(stats.lastError)")
                         .font(.caption2).foregroundColor(.red)
@@ -351,7 +358,7 @@ struct RcloneStatusView: View {
                 } else if let result = lastResult, let completedAt = result.completedAt {
                     Text(completionSummary(result: result, completedAt: completedAt))
                         .font(.caption2)
-                        .foregroundColor(result.status == .done ? .green : .red)
+                        .foregroundColor(result.status == .done ? .green : result.status == .warning ? .orange : .red)
                         .monospacedDigit()
                 } else {
                     Text("--:--").font(.caption2).foregroundColor(.secondary).monospacedDigit()
@@ -377,7 +384,8 @@ struct RcloneStatusView: View {
         let fmt = DateFormatter()
         fmt.dateStyle = .short
         fmt.timeStyle = .medium
-        let label = result.status == .done ? "completed" : "failed"
+        let label = result.status == .done ? "completed"
+            : result.status == .warning ? "completed with warnings" : "failed"
         return "\(label) \(fmt.string(from: completedAt)) · \(elapsedFromSeconds(result.durationSeconds))"
     }
 

@@ -8,6 +8,7 @@ final class MockJob: BackupJob {
     var startCalled = false
     var shouldSucceed = true
     var failureReason: String?
+    var finishesWithWarning = false
 
     init(jobType: JobType) {
         self.jobType = jobType
@@ -16,7 +17,7 @@ final class MockJob: BackupJob {
 
     func start() async throws {
         startCalled = true
-        let status: JobStatus = shouldSucceed ? .done : .failed
+        let status: JobStatus = finishesWithWarning ? .warning : shouldSucceed ? .done : .failed
         progress.send(JobProgress(fraction: 1.0, bytesTransferred: 1024,
                                   bytesTotal: 1024, transferRate: "", status: status))
     }
@@ -249,5 +250,30 @@ final class BackupCoordinatorTests: XCTestCase {
         await coordinator.performBackup()
         let cleared = await MainActor.run { coordinator.lastFailureReason }
         XCTAssertNil(cleared)
+    }
+
+    func testRunWithSkippedFilesIsPartialNotSuccess() async throws {
+        let job = MockJob(jobType: .dropbox)
+        job.finishesWithWarning = true
+        job.failureReason = "3 files couldn't be copied"
+        let coordinator = await MainActor.run {
+            BackupCoordinator(db: db, settings: settings) { _ in [job] }
+        }
+        await coordinator.performBackup()
+        let run = try XCTUnwrap(db.fetchRecentRuns(limit: 1).first)
+        XCTAssertEqual(run.status, .partial)
+        XCTAssertEqual(try db.fetchJobResults(forRun: run.id!).first?.status, .warning)
+        let reason = await MainActor.run { coordinator.lastFailureReason }
+        XCTAssertEqual(reason, "3 files couldn't be copied")
+    }
+
+    func testSingleJobRunWithSkippedFilesIsPartial() async throws {
+        let job = MockJob(jobType: .dropbox)
+        job.finishesWithWarning = true
+        let coordinator = await MainActor.run {
+            BackupCoordinator(db: db, settings: settings) { _ in [job] }
+        }
+        await coordinator.performSingleJob(.dropbox)
+        XCTAssertEqual(try db.fetchRecentRuns(limit: 1).first?.status, .partial)
     }
 }

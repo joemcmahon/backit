@@ -45,7 +45,7 @@ private struct RunRowView: View {
                         Text(r.jobType.rawValue).font(.caption2)
                         Spacer()
                         Text(r.status.rawValue).font(.caption2)
-                            .foregroundColor(r.status == .done ? .green : .red)
+                            .foregroundColor(r.status == .done ? .green : r.status == .warning ? .orange : .red)
                     }.padding(.leading, 16)
                 }
             }

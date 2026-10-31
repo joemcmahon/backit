@@ -174,15 +174,22 @@ final class DropboxJob: BackupJob {
         }
         let persistentlyFailed = await retryFailedPaths(failedPaths)
         guard !Task.isCancelled else { return }
-        await cleanupFailedDirectories(failedDirectories)
+        let incompleteFolders = await cleanupFailedDirectories(failedDirectories)
         if verify && !Task.isCancelled { await runVerification() }
         let succeeded = proc.terminationStatus == 0 || currentStats.onlyRecoverableErrors
             || (currentStats.errors > 0 && currentStats.realErrors == 0)
-        currentStats.status = (succeeded || !persistentlyFailed.isEmpty) ? .done : .failed
+        let finalStatus = Self.outcome(syncSucceeded: succeeded,
+                                       uncopiedFiles: persistentlyFailed.count,
+                                       incompleteFolders: incompleteFolders)
+        if finalStatus == .warning {
+            failureReason = Self.warningReason(uncopiedFiles: persistentlyFailed.count,
+                                               incompleteFolders: incompleteFolders)
+        }
+        currentStats.status = finalStatus
         statsSubject.send(currentStats)
         let rateText: String
-        if !persistentlyFailed.isEmpty {
-            rateText = "Done — \(persistentlyFailed.count) file\(persistentlyFailed.count == 1 ? "" : "s") skipped"
+        if finalStatus == .warning, let failureReason {
+            rateText = "Done — \(failureReason)"
         } else if succeeded && currentStats.rateLimitHits > 0 {
             rateText = "Done — \(currentStats.rateLimitHits) rate limit hit\(currentStats.rateLimitHits == 1 ? "" : "s")"
         } else if succeeded {
@@ -190,9 +197,8 @@ final class DropboxJob: BackupJob {
         } else {
             rateText = "Failed"
         }
-        let finalStatus: JobStatus = (succeeded || !persistentlyFailed.isEmpty) ? .done : .failed
         progress.send(JobProgress(
-            fraction: finalStatus == .done ? 1.0 : progress.value.fraction,
+            fraction: finalStatus == .failed ? progress.value.fraction : 1.0,
             bytesTransferred: progress.value.bytesTransferred,
             bytesTotal: progress.value.bytesTotal,
             transferRate: rateText,
@@ -317,10 +323,38 @@ final class DropboxJob: BackupJob {
         statsSubject.send(currentStats)
     }
 
+    // A clean sync with nothing left behind is done; anything that should have been copied but
+    // wasn't makes it a warning, so a green result means everything really copied.
+    nonisolated static func outcome(syncSucceeded: Bool, uncopiedFiles: Int, incompleteFolders: Int) -> JobStatus {
+        if uncopiedFiles > 0 || incompleteFolders > 0 { return .warning }
+        return syncSucceeded ? .done : .failed
+    }
+
+    nonisolated static func warningReason(uncopiedFiles: Int, incompleteFolders: Int) -> String? {
+        var parts: [String] = []
+        if uncopiedFiles > 0 {
+            parts.append("\(uncopiedFiles) file\(uncopiedFiles == 1 ? "" : "s") couldn't be copied")
+        }
+        if incompleteFolders > 0 {
+            parts.append("\(incompleteFolders) folder\(incompleteFolders == 1 ? "" : "s") couldn't be fully synced")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "; ")
+    }
+
+    // True if a cleanup re-sync's JSON log still has errors that mean files are missing.
+    // Rate limits and directory-modtime errors don't, and are ignored as in the main sync.
+    nonisolated static func cleanupLeftErrors(_ stderr: String) -> Bool {
+        stderr.components(separatedBy: .newlines).contains {
+            RcloneStatsParser.parseError($0) != nil || RcloneStatsParser.parseDirectoryError($0) != nil
+        }
+    }
+
     // Cleanup phase: re-sync each directory that had a read error, one at a time.
     // Ensures no files were missed due to rate-limit-induced directory read failures.
-    private func cleanupFailedDirectories(_ dirs: [String]) async {
-        guard !dirs.isEmpty else { return }
+    // Returns how many directories still had errors afterwards.
+    private func cleanupFailedDirectories(_ dirs: [String]) async -> Int {
+        guard !dirs.isEmpty else { return 0 }
+        var incomplete = 0
         let unique = Array(Set(dirs)).sorted()
         let dest = volumePath.trimmingCharacters(in: .whitespaces)
         for (i, dir) in unique.enumerated() {
@@ -337,18 +371,16 @@ final class DropboxJob: BackupJob {
                 "sync", "\(remoteName):\(dir)", "\(dest)/\(dir)",
                 "--tpslimit", "12", "--tpslimit-burst", "0",
                 "--retries", "2", "--low-level-retries", "2",
-                "--stats", "2s", "--stats-log-level", "NOTICE",
-                "--ignore-errors"
+                "--ignore-errors",
+                "--use-json-log"
             ]
-            proc.standardError = FileHandle.nullDevice  // an unread Pipe would fill and hang rclone
-            guard (try? proc.run()) != nil else { continue }
-            await withCheckedContinuation { continuation in
-                DispatchQueue.global(qos: .utility).async {
-                    proc.waitUntilExit()
-                    continuation.resume()
-                }
+            guard let errText = await ProcessRunner.runCollectingStderr(proc),
+                  !Self.cleanupLeftErrors(errText) else {
+                incomplete += 1
+                continue
             }
         }
+        return incomplete
     }
 
     // Runs up to 2 targeted `rclone copy --files-from` passes on failed paths.
@@ -378,7 +410,7 @@ final class DropboxJob: BackupJob {
                 "--files-from", tmpURL.path,
                 "\(remoteName):", volumePath.trimmingCharacters(in: .whitespaces),
                 "--retries", "1", "--low-level-retries", "1",
-                "--stats", "2s"
+                "--use-json-log"   // parseError below only understands JSON log lines
             ]
             guard let errText = await ProcessRunner.runCollectingStderr(proc) else { break }
             remaining = errText.components(separatedBy: .newlines)

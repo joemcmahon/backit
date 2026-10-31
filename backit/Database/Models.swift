@@ -9,7 +9,8 @@ enum JobType: String {
 }
 
 enum JobStatus: String {
-    case idle, running, done, failed, skipped
+    // warning: finished, but some files that should have been copied weren't
+    case idle, running, done, warning, failed, skipped
 }
 
 struct BackupRun {

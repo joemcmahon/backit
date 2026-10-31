@@ -147,7 +147,7 @@ enum HelpContent {
     <p>After the sync completes, the status line shows:</p>
     <ul>
       <li><code>Complete</code> — all files synced with no issues</li>
-      <li><code>Done — N file(s) skipped</code> — some files were skipped (usually permission errors)</li>
+      <li><code>Done with warnings — some files weren't copied</code> (orange) — files that should have been copied still failed after retries, or a folder couldn't be fully re-synced. The bottom bar says how many.</li>
       <li><code>Done — N rate limit hit(s)</code> — Dropbox API rate limits were hit; files were retried</li>
       <li><code>Verified ✓</code> — verification passed after sync</li>
       <li><code>⚠ N difference(s) found</code> — verification found mismatches (see Details)</li>
@@ -156,7 +156,7 @@ enum HelpContent {
     <h3>Bottom bar</h3>
     <table>
       <tr><th>Element</th><th>Description</th></tr>
-      <tr><td>Last backup status</td><td>✓ success · ⚠ partial failure · − skipped</td></tr>
+      <tr><td>Last backup status</td><td>✓ everything copied · ⚠ finished, but some files weren't copied (count shown) · ✗ failed · − skipped</td></tr>
       <tr><td>Last backup date</td><td>When the last backup ran</td></tr>
       <tr><td>Next backup</td><td>Scheduled time for the next automatic backup</td></tr>
       <tr><td>Details button</td><td>Shows the last 12 lines of rclone output + link to full log (appears after rclone runs)</td></tr>
