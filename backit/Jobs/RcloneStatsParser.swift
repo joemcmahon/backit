@@ -113,6 +113,10 @@ enum RcloneStatsParser {
             return true
         }
 
+        if msg.contains("no space left on device") {
+            stats.diskFullErrors += 1
+        }
+
         // Real error — update lastError
         if let obj = json["object"] as? String, !obj.isEmpty {
             stats.lastError = "\(obj): \(msg)"

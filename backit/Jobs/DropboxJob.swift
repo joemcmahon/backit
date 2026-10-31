@@ -19,6 +19,7 @@ final class DropboxJob: BackupJob {
     let statsSubject = CurrentValueSubject<RcloneStats, Never>(.idle)
     // Final stats block text, available after start() returns.
     private(set) var summary: String = ""
+    private(set) var failureReason: String?
 
     static var latestLogFilePath = "/tmp/backit-rclone.log"
     private(set) var logFilePath: String = "/tmp/backit-rclone.log"
@@ -43,6 +44,7 @@ final class DropboxJob: BackupJob {
         failedDirectories = []
         statsBuffer = []
         summary = ""
+        failureReason = nil
         currentStats = RcloneStats(status: .running)
         statsSubject.send(currentStats)
         // Create timestamped log file for this run
@@ -157,6 +159,19 @@ final class DropboxJob: BackupJob {
         // Targeted retry for any files that failed during the main sync.
         // Skip post-processing entirely if the task was cancelled — avoids spawning new rclone processes.
         guard !Task.isCancelled else { return }
+        // A full destination fails every retry too, so stop here and say why.
+        if currentStats.volumeFull {
+            failureReason = "Backup volume is full"
+            currentStats.status = .failed
+            statsSubject.send(currentStats)
+            progress.send(JobProgress(
+                fraction: progress.value.fraction,
+                bytesTransferred: progress.value.bytesTransferred,
+                bytesTotal: progress.value.bytesTotal,
+                transferRate: "Backup volume full",
+                status: .failed))
+            return
+        }
         let persistentlyFailed = await retryFailedPaths(failedPaths)
         guard !Task.isCancelled else { return }
         await cleanupFailedDirectories(failedDirectories)
@@ -234,8 +249,9 @@ final class DropboxJob: BackupJob {
             "--combined", checkReportPath
         ]
 
-        // Discard stderr — rclone check produces no useful stderr output
-        proc.standardError = Pipe()
+        // Discard stderr — rclone check produces no useful stderr output, and an unread Pipe
+        // would fill on a long check and hang rclone
+        proc.standardError = FileHandle.nullDevice
 
         guard (try? proc.run()) != nil else { return }
 
@@ -324,7 +340,7 @@ final class DropboxJob: BackupJob {
                 "--stats", "2s", "--stats-log-level", "NOTICE",
                 "--ignore-errors"
             ]
-            proc.standardError = Pipe()  // discard; errors logged separately
+            proc.standardError = FileHandle.nullDevice  // an unread Pipe would fill and hang rclone
             guard (try? proc.run()) != nil else { continue }
             await withCheckedContinuation { continuation in
                 DispatchQueue.global(qos: .utility).async {
@@ -364,18 +380,7 @@ final class DropboxJob: BackupJob {
                 "--retries", "1", "--low-level-retries", "1",
                 "--stats", "2s"
             ]
-            let errPipe = Pipe()
-            proc.standardError = errPipe
-            guard (try? proc.run()) != nil else { break }
-            await withCheckedContinuation { continuation in
-                DispatchQueue.global(qos: .utility).async {
-                    proc.waitUntilExit()
-                    continuation.resume()
-                }
-            }
-            // Read all stderr after exit — avoids concurrent mutation issues
-            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-            let errText = String(data: errData, encoding: .utf8) ?? ""
+            guard let errText = await ProcessRunner.runCollectingStderr(proc) else { break }
             remaining = errText.components(separatedBy: .newlines)
                 .compactMap { RcloneStatsParser.parseError($0) }
         }

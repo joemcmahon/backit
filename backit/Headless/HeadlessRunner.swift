@@ -70,7 +70,8 @@ final class HeadlessRunner {
         let completedAt = recentRun?.completedAt ?? Date()
         let body = Self.notificationBody(jobResults: jobResults,
                                          lastRunStatus: coordinator.lastRunStatus,
-                                         completedAt: completedAt)
+                                         completedAt: completedAt,
+                                         failureReason: coordinator.lastFailureReason)
         let content = UNMutableNotificationContent()
         content.title = "Backit"
         content.body = body
@@ -83,7 +84,8 @@ final class HeadlessRunner {
     // Static so tests can call it without constructing a full HeadlessRunner
     nonisolated static func notificationBody(jobResults: [JobResult],
                                  lastRunStatus: RunStatus?,
-                                 completedAt: Date) -> String {
+                                 completedAt: Date,
+                                 failureReason: String? = nil) -> String {
         let timeString = timeFormatter.string(from: completedAt)
 
         if jobResults.isEmpty && lastRunStatus == .success {
@@ -97,12 +99,13 @@ final class HeadlessRunner {
         let succeeded = jobResults.filter { $0.status == .done }.map { jobName($0.jobType) }
         let failed    = jobResults.filter { $0.status != .done }.map { jobName($0.jobType) }
 
+        let reason = failureReason.map { " \($0)." } ?? ""
         if failed.isEmpty {
             return "Backup completed at \(timeString) — \(listString(succeeded)) succeeded."
         } else if succeeded.isEmpty {
-            return "Backup failed at \(timeString) — \(listString(failed)) failed."
+            return "Backup failed at \(timeString) — \(listString(failed)) failed.\(reason)"
         } else {
-            return "Backup completed at \(timeString) — \(listString(succeeded)) succeeded; \(listString(failed)) failed."
+            return "Backup completed at \(timeString) — \(listString(succeeded)) succeeded; \(listString(failed)) failed.\(reason)"
         }
     }
 

@@ -30,12 +30,14 @@ struct RcloneStats {
     var rateLimitHits: Int = 0   // subset of errors that are 429s
     var modtimeErrors: Int = 0   // chtimes errors on deleted paths — benign, not transfer failures
     var transientErrors: Int = 0 // directory read failures, march errors — retried by cleanup phase
+    var diskFullErrors: Int = 0  // "no space left on device" — retrying can't help
     var transferRate: String = ""
     var status: JobStatus = .idle
 
     var lastError: String = ""   // last non-rate-limit, non-modtime ERROR line (for UI/notification)
     var realErrors: Int { max(0, errors - rateLimitHits - modtimeErrors - transientErrors) }
     var onlyRecoverableErrors: Bool { errors > 0 && realErrors == 0 }
+    var volumeFull: Bool { diskFullErrors > 0 }
     // Verification result: nil = not run, 0 = verified clean, >0 = differences found
     var verificationDifferences: Int? = nil
     var verificationMismatches: [String] = []
@@ -53,6 +55,12 @@ struct RcloneStats {
 protocol BackupJob: AnyObject {
     var jobType: JobType { get }
     var progress: CurrentValueSubject<JobProgress, Never> { get }
+    /// Why the last run failed, when there's something more useful to say than "failed".
+    var failureReason: String? { get }
     func start() async throws
     func cancel()
+}
+
+extension BackupJob {
+    var failureReason: String? { nil }
 }

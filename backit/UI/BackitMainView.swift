@@ -38,13 +38,14 @@ struct BackitMainView: View {
                         let _ = { fmt.dateStyle = .medium; fmt.timeStyle = .short }()
                         let dateStr = fmt.string(from: date)
                         let labelStr: String = {
-                            guard let dur = coordinator.lastRunDuration else { return dateStr }
+                            let reason = coordinator.lastFailureReason.map { " · \($0)" } ?? ""
+                            guard let dur = coordinator.lastRunDuration else { return dateStr + reason }
                             let total = Int(dur)
                             let h = total / 3600; let m = (total % 3600) / 60; let s = total % 60
                             let durStr = h > 0
                                 ? String(format: "%d:%02d:%02d", h, m, s)
                                 : String(format: "%d:%02d", m, s)
-                            return "\(dateStr) · \(durStr) total"
+                            return "\(dateStr) · \(durStr) total\(reason)"
                         }()
                         Label(labelStr,
                               systemImage: status == .success ? "checkmark.circle.fill" :

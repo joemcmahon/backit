@@ -309,6 +309,12 @@ enum HelpContent {
     <ul>
       <li>The path shown in backit's Dropbox section must be an exact match to the mounted volume</li>
     </ul>
+    <h3>Backup failed with "Backup volume is full"</h3>
+    <ul>
+      <li>rclone ran out of space on the backup volume. backit stops instead of retrying, since every retry would fail the same way.</li>
+      <li>Free up space on the volume (or move to a bigger one) and run the backup again. The next run picks up where this one left off.</li>
+      <li>The full rclone log for each run is in <code>/tmp/backit-rclone-&lt;date&gt;-&lt;time&gt;.log</code>.</li>
+    </ul>
     <h3>Scheduled headless backup didn't run</h3>
     <ul>
       <li>Check that <code>~/Library/LaunchAgents/backit.plist</code> exists</li>

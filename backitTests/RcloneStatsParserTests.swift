@@ -155,4 +155,15 @@ final class RcloneStatsParserTests: XCTestCase {
         _ = RcloneStatsParser.updateStats(&stats, from: line)
         XCTAssertEqual(stats.transientErrors, 1)
     }
+
+    func testDiskFullErrorsCounted() {
+        var stats = RcloneStats()
+        let line = """
+        {"time":"2026-10-29T00:55:49.328905-07:00","level":"error","msg":"Failed to copy: write /Volumes/Backup/a.mp3.859507ab.partial: no space left on device","object":"a.mp3","objectType":"*dropbox.Object","source":"slog/logger.go:256"}
+        """
+        _ = RcloneStatsParser.updateStats(&stats, from: line)
+        XCTAssertEqual(stats.diskFullErrors, 1)
+        XCTAssertTrue(stats.volumeFull)
+        XCTAssertFalse(RcloneStats().volumeFull)
+    }
 }

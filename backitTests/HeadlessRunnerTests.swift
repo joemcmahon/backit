@@ -33,6 +33,16 @@ final class HeadlessRunnerTests: XCTestCase {
         XCTAssertFalse(body.contains("succeeded"), "body: \(body)")
     }
 
+    func testNotificationBodyIncludesFailureReason() async {
+        let results = [makeJobResult(type: .dropbox, status: .failed)]
+        let body = HeadlessRunner.notificationBody(
+            jobResults: results, lastRunStatus: .failed,
+            completedAt: makeDate(hour: 1, minute: 12),
+            failureReason: "Backup volume is full")
+        XCTAssertTrue(body.contains("Dropbox failed"), "body: \(body)")
+        XCTAssertTrue(body.contains("Backup volume is full"), "body: \(body)")
+    }
+
     func testNotificationBodyNoJobsConfigured() async {
         let startedAt = makeDate(hour: 2, minute: 0)
         let body = HeadlessRunner.notificationBody(

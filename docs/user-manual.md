@@ -240,6 +240,11 @@ Learn more at [parachutebackup.com](https://parachutebackup.com).
 **Backup says "skipped" even though drive is connected**
 - The path shown in backit's Dropbox section must be an exact match to the mounted volume
 
+**Backup failed with "Backup volume is full"**
+- rclone ran out of space on the backup volume. backit stops instead of retrying, since every retry would fail the same way.
+- Free up space on the volume (or move to a bigger one) and run the backup again. The next run picks up where this one left off.
+- The full rclone log for each run is in `/tmp/backit-rclone-<date>-<time>.log`.
+
 **Scheduled headless backup didn't run**
 - Check `~/Library/LaunchAgents/backit.plist` exists
 - Run `launchctl list | grep backit` in Terminal — if it's not listed, launch the app manually once to reinstall the LaunchAgent

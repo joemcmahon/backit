@@ -14,6 +14,7 @@ final class BackupCoordinator: ObservableObject {
     @Published var rcloneStats: RcloneStats = .idle
     @Published var dropboxLastResult: JobResult? = nil
     @Published var lastRunDuration: TimeInterval? = nil
+    @Published var lastFailureReason: String? = nil
 
     private let db: DatabaseManager
     private let settings: BackupSettings
@@ -150,6 +151,7 @@ final class BackupCoordinator: ObservableObject {
         guard let job = allJobs.first(where: { $0.jobType == targetType }) else {
             isRunning = false; return
         }
+        lastFailureReason = nil
 
         currentJobType = job.jobType
         let jobStart = Date()
@@ -189,6 +191,7 @@ final class BackupCoordinator: ObservableObject {
         result.completedAt = Date()
         try? db.save(&result)
         dropboxLastResult = result
+        lastFailureReason = job.failureReason
 
         run.completedAt = Date()
         run.status = fp.status == .done ? .success : .failed
@@ -232,6 +235,7 @@ final class BackupCoordinator: ObservableObject {
         }
 
         let jobs = jobFactory(settings)
+        lastFailureReason = nil
         var anyFailed = false
         var anySucceeded = false
 
@@ -282,6 +286,7 @@ final class BackupCoordinator: ObservableObject {
             result.completedAt = Date()
             try? db.save(&result)
             dropboxLastResult = result
+            if let reason = job.failureReason { lastFailureReason = reason }
 
             if fp.status == .done { anySucceeded = true } else { anyFailed = true }
         }

@@ -7,6 +7,7 @@ final class MockJob: BackupJob {
     let progress: CurrentValueSubject<JobProgress, Never>
     var startCalled = false
     var shouldSucceed = true
+    var failureReason: String?
 
     init(jobType: JobType) {
         self.jobType = jobType
@@ -230,5 +231,23 @@ final class BackupCoordinatorTests: XCTestCase {
         XCTAssertNotNil(dropboxResult)
         XCTAssertEqual(dropboxResult?.status, .done)
         XCTAssertNotNil(duration)
+    }
+
+    func testFailureReasonPublishedAfterRun() async throws {
+        let job = MockJob(jobType: .dropbox)
+        job.shouldSucceed = false
+        job.failureReason = "Backup volume is full"
+        let coordinator = await MainActor.run {
+            BackupCoordinator(db: db, settings: settings) { _ in [job] }
+        }
+        await coordinator.performBackup()
+        let reason = await MainActor.run { coordinator.lastFailureReason }
+        XCTAssertEqual(reason, "Backup volume is full")
+
+        job.shouldSucceed = true
+        job.failureReason = nil
+        await coordinator.performBackup()
+        let cleared = await MainActor.run { coordinator.lastFailureReason }
+        XCTAssertNil(cleared)
     }
 }
