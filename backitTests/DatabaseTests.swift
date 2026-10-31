@@ -116,12 +116,14 @@ final class DatabaseTests: XCTestCase {
             (1, 100, 110, 'success', 'A'),
             (2, 200, 210, 'partial', 'A'),
             (3, 300, 310, 'success', 'A'),
-            (4, 400, NULL, 'running', 'A');
+            (4, 400, NULL, 'running', 'A'),
+            (5, 500, 510, 'partial', 'A');
         INSERT INTO jobResult (runId, jobType, status, bytesTransferred, bytesTotal, durationSeconds) VALUES
             (1, 'disk', 'done', 0, 0, 1),
             (2, 'disk', 'failed', 0, 0, 1),
             (2, 'dropbox', 'done', 0, 0, 1),
-            (3, 'dropbox', 'done', 0, 0, 1);
+            (3, 'dropbox', 'done', 0, 0, 1),
+            (5, 'dropbox', 'failed', 0, 0, 1);
         """
         XCTAssertEqual(sqlite3_exec(raw, legacy, nil, nil, nil), SQLITE_OK)
         sqlite3_close(raw)
@@ -130,8 +132,17 @@ final class DatabaseTests: XCTestCase {
         let runIds = try db.fetchRecentRuns(limit: 10).compactMap(\.id).sorted()
         // CCC-only run 1 is gone; mixed run 2 keeps only its Dropbox result;
         // run 4 (no results yet, e.g. in progress elsewhere) is left alone.
-        XCTAssertEqual(runIds, [2, 3, 4])
+        XCTAssertEqual(runIds, [2, 3, 4, 5])
         XCTAssertEqual(try db.fetchJobResults(forRun: 2).map(\.jobType), [.dropbox])
         XCTAssertEqual(try db.fetchJobResults(forRun: 3).map(\.jobType), [.dropbox])
+
+        // "partial" only made sense with two jobs: the run's status now follows its
+        // Dropbox result, including run 5, whose CCC result an earlier purge removed.
+        let statuses = Dictionary(uniqueKeysWithValues:
+            try db.fetchRecentRuns(limit: 10).map { ($0.id!, $0.status) })
+        XCTAssertEqual(statuses[2], .success)
+        XCTAssertEqual(statuses[3], .success)
+        XCTAssertEqual(statuses[4], .running)
+        XCTAssertEqual(statuses[5], .failed)
     }
 }

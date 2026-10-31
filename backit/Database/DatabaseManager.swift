@@ -80,13 +80,20 @@ final class DatabaseManager {
 
     /// backit used to run Carbon Copy Cloner jobs too. Drop that history: runs that were
     /// CCC-only go entirely, mixed runs keep their Dropbox result. Runs with no results
-    /// (possibly in progress in another process) are left alone.
+    /// (possibly in progress in another process) are left alone. A "partial" run can only
+    /// have come from the two-job days, so its status is reset from its Dropbox result.
     private func purgeLegacyCCCHistory() throws {
         let sql = """
         DELETE FROM backupRun
         WHERE id IN (SELECT runId FROM jobResult WHERE jobType != 'dropbox')
           AND id NOT IN (SELECT runId FROM jobResult WHERE jobType = 'dropbox');
         DELETE FROM jobResult WHERE jobType != 'dropbox';
+        UPDATE backupRun
+        SET status = CASE
+            (SELECT status FROM jobResult WHERE runId = backupRun.id AND jobType = 'dropbox' LIMIT 1)
+            WHEN 'done' THEN 'success' ELSE 'failed' END
+        WHERE status = 'partial'
+          AND id IN (SELECT runId FROM jobResult WHERE jobType = 'dropbox');
         """
         guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
             throw DatabaseError.exec(String(cString: sqlite3_errmsg(db)))
