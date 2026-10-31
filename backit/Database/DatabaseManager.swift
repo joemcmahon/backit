@@ -73,8 +73,12 @@ final class DatabaseManager {
             throw DatabaseError.exec(String(cString: sqlite3_errmsg(db)))
         }
         // Additive migration: add completedAt to jobResult if not present.
-        // Returns SQLITE_ERROR ("duplicate column name") on re-run — that's expected; ignore it.
-        sqlite3_exec(db, "ALTER TABLE jobResult ADD COLUMN completedAt REAL;", nil, nil, nil)
+        // Checked first so SQLite doesn't log a "duplicate column name" error on every launch.
+        if try !columnExists("completedAt", in: "jobResult") {
+            guard sqlite3_exec(db, "ALTER TABLE jobResult ADD COLUMN completedAt REAL;", nil, nil, nil) == SQLITE_OK else {
+                throw DatabaseError.exec(String(cString: sqlite3_errmsg(db)))
+            }
+        }
         try purgeLegacyCCCHistory()
     }
 
@@ -308,6 +312,15 @@ final class DatabaseManager {
     }
 
     // MARK: - Helpers
+
+    private func columnExists(_ column: String, in table: String) throws -> Bool {
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        try checkOK(sqlite3_prepare_v2(db, "SELECT 1 FROM pragma_table_info(?) WHERE name = ?", -1, &stmt, nil))
+        sqlite3_bind_text(stmt, 1, table, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 2, column, -1, SQLITE_TRANSIENT)
+        return sqlite3_step(stmt) == SQLITE_ROW
+    }
 
     private func checkOK(_ code: Int32) throws {
         guard code == SQLITE_OK else {

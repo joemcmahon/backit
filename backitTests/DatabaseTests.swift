@@ -145,4 +145,36 @@ final class DatabaseTests: XCTestCase {
         XCTAssertEqual(statuses[4], .running)
         XCTAssertEqual(statuses[5], .failed)
     }
+
+    func testOpeningAddsCompletedAtToOldSchema() throws {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("backit-test-\(UUID().uuidString).db").path
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        var raw: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(path, &raw), SQLITE_OK)
+        let oldSchema = """
+        CREATE TABLE jobResult (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            runId INTEGER NOT NULL,
+            jobType TEXT NOT NULL,
+            status TEXT NOT NULL,
+            bytesTransferred INTEGER NOT NULL,
+            bytesTotal INTEGER NOT NULL,
+            durationSeconds INTEGER NOT NULL
+        );
+        """
+        XCTAssertEqual(sqlite3_exec(raw, oldSchema, nil, nil, nil), SQLITE_OK)
+        sqlite3_close(raw)
+
+        let db = try DatabaseManager(path: path)
+        var run = BackupRun(startedAt: Date(), completedAt: nil, status: .running, macosBuild: "A")
+        try db.save(&run)
+        let expected = Date(timeIntervalSince1970: 1_700_000_000)
+        var result = JobResult(runId: run.id!, jobType: .dropbox, status: .done,
+                               bytesTransferred: 0, bytesTotal: 0, durationSeconds: 1,
+                               completedAt: expected)
+        try db.save(&result)
+        XCTAssertEqual(try db.fetchJobResults(forRun: run.id!).first?.completedAt, expected)
+    }
 }
