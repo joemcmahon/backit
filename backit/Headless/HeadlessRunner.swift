@@ -110,9 +110,7 @@ final class HeadlessRunner {
 
     private nonisolated static func jobName(_ type: JobType) -> String {
         switch type {
-        case .disk:     return "disk clone"
         case .dropbox:  return "Dropbox"
-        case .bootable: return "bootable clone"
         }
     }
 

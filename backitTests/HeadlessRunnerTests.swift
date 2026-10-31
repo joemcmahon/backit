@@ -17,36 +17,17 @@ final class HeadlessRunnerTests: XCTestCase {
 
     func testNotificationBodyAllSucceeded() async {
         let startedAt = makeDate(hour: 2, minute: 0)
-        let results = [
-            makeJobResult(type: .disk, status: .done),
-            makeJobResult(type: .dropbox, status: .done)
-        ]
+        let results = [makeJobResult(type: .dropbox, status: .done)]
         let body = HeadlessRunner.notificationBody(
             jobResults: results, lastRunStatus: .success, completedAt: startedAt)
         XCTAssertTrue(body.contains("succeeded"), "body: \(body)")
-        XCTAssertTrue(body.contains("disk clone"), "body: \(body)")
         XCTAssertTrue(body.contains("Dropbox"), "body: \(body)")
         XCTAssertFalse(body.contains("failed"), "body: \(body)")
     }
 
-    func testNotificationBodyPartial() async {
-        let startedAt = makeDate(hour: 2, minute: 0)
-        let results = [
-            makeJobResult(type: .disk, status: .failed),
-            makeJobResult(type: .dropbox, status: .done)
-        ]
-        let body = HeadlessRunner.notificationBody(
-            jobResults: results, lastRunStatus: .partial, completedAt: startedAt)
-        XCTAssertTrue(body.contains("Dropbox") && body.contains("succeeded"), "body: \(body)")
-        XCTAssertTrue(body.contains("disk clone") && body.contains("failed"), "body: \(body)")
-    }
-
     func testNotificationBodyAllFailed() async {
         let startedAt = makeDate(hour: 2, minute: 0)
-        let results = [
-            makeJobResult(type: .disk, status: .failed),
-            makeJobResult(type: .dropbox, status: .failed)
-        ]
+        let results = [makeJobResult(type: .dropbox, status: .failed)]
         let body = HeadlessRunner.notificationBody(
             jobResults: results, lastRunStatus: .failed, completedAt: startedAt)
         XCTAssertFalse(body.contains("succeeded"), "body: \(body)")

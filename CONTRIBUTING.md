@@ -2,14 +2,14 @@
 
 backit is a personal macOS backup tool, shared as-is under the [MIT license](LICENSE) and maintained in spare time by one person. Issues and PRs are welcome, but there's no SLA on review or response time.
 
-This is fundamentally a single-user tool built around one specific workflow (Carbon Copy Cloner + Dropbox via rclone). Feature requests that fit that shape are more likely to land than ones that significantly expand scope — please open an issue before starting a large PR so we can agree on the approach first.
+This is fundamentally a single-user tool built around one specific workflow (backing up Dropbox to a local drive via rclone). Feature requests that fit that shape are more likely to land than ones that significantly expand scope — please open an issue before starting a large PR so we can agree on the approach first.
 
 ## Development setup
 
 Requirements:
 - macOS 26.2 or later
 - Xcode (matching the deployment target)
-- Carbon Copy Cloner and rclone installed, if you want to exercise real backups — unit tests mock both
+- rclone installed, if you want to exercise real backups — unit tests mock it
 
 ```bash
 # Run tests
@@ -31,7 +31,7 @@ xcodebuild build -project backit.xcodeproj -scheme backit
 
 Please include:
 - macOS version
-- CCC and rclone versions (`rclone version`)
+- rclone version (`rclone version`)
 - Relevant log output — Dropbox syncs log to `/tmp/backit-rclone.log`
 - Whether the issue occurred in the interactive app or the headless, launchd-triggered run
 

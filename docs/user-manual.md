@@ -2,14 +2,13 @@
 
 ## Overview
 
-backit is an application that automates daily backups of your system and your Dropbox. Just run it, set the backup time you prefer, have the disk connected, and it will quietly keep backing up your files until you stop it.
+backit is an application that automates a daily backup of your Dropbox to a local drive. Just run it, set the backup time you prefer, have the disk connected, and it will quietly keep backing up your files until you stop it.
 
 It runs quietly in the background, notifies you before backups, and shows live progress while they run.
 
-backit runs two backup tools that you configure separately:
+backit uses **rclone** to copy your Dropbox cloud storage down to a folder on a local backup volume. That's the only thing it does.
 
-- **Carbon Copy Cloner (CCC)** — handles the backup of your internal Mac drive to an external volume
-- **rclone** — syncs your Dropbox cloud storage to a local folder on a backup volume
+> **Backing up your Mac's internal drive?** Earlier versions of backit could also run a Carbon Copy Cloner task. CCC has its own scheduler, so that job has been removed — schedule your CCC task in CCC itself.
 
 ---
 
@@ -17,18 +16,14 @@ backit runs two backup tools that you configure separately:
 
 ### Before you launch backit
 
-1. **Install Carbon Copy Cloner** from [bombich.com](https://bombich.com) and create at least one backup task.
-   - Open CCC, click the `+` button, name your task (e.g., "My Backup"), choose a source and destination, and save.
-   - You'll enter this task name in backit's settings to configure the hard disk backup.
-
-2. **Install rclone** via Homebrew:
+1. **Install rclone** via Homebrew:
    ```
    brew install rclone
    ```
 
    **Dropbox remote** — run `rclone config` and follow the wizard to add a Dropbox remote. The remote name you give it (e.g., `my-dropbox`) is what you'll select in backit.
 
-3. **Connect your backup drive** — backit needs the destination volume or volumes to be mounted at backup time. It will alert you if the disk or disks are missing.
+2. **Connect your backup drive** — backit needs the destination volume to be mounted at backup time. It will alert you if the disk is missing.
 
 ### First launch
 
@@ -42,17 +37,6 @@ backit runs two backup tools that you configure separately:
 ## The Main Window
 
 Click on backit in the dock to bring its window to the front; if you've closed it, just click on the Dock icon to bring it back.
-
-### Internal Disk (CCC) section
-
-Shows the status of your Carbon Copy Cloner backup:
-
-- **Source dropdown** — select the CCC task to run (this is automatically populated from CCC's saved tasks - just pick the one you set up earlier)
-- **Destination button** — opens CCC so you can view or edit the task
-- **Progress bar** — fills as the backup progresses (0–100%)
-- **Elapsed time** — how long the backup has been running
-
-During the scan phase at the start of a CCC backup, the progress bar shows "Scanning…" until CCC determines what needs to be copied. There's usually some time while CCC figures out how long the backup will take before the progress bar starts updating -- don't worry! You can always switch over to CCC and check the backup progress in its window.
 
 ### Dropbox (rclone) section
 
@@ -102,7 +86,7 @@ With default settings (11:00 PM backup, 30-min preflight, 120-min reminder):
 |------|-------------|
 | 8:00 PM | **Reminder** notification — "Backup Tonight at 11:00 PM" |
 | 10:30 PM | **Final check** notification — alerts if your backup drive is still not connected |
-| 11:00 PM | **Backup runs** — CCC first, then Dropbox |
+| 11:00 PM | **Backup runs** — Dropbox sync |
 
 The reminder and final check times adjust automatically when you change the backup time or interval settings.
 
@@ -155,7 +139,7 @@ You can still run a backup manually at any time by clicking "Run Backup" — thi
 
 ## Running a Manual Backup
 
-Click **Run Backup** at any time to start a backup immediately. The backup runs the same sequence as a scheduled backup: CCC first, then Dropbox.
+Click **Run Backup** at any time to start a backup immediately. The backup runs the same Dropbox sync as a scheduled backup.
 
 To run only the verification step (rclone check, no sync), hold the **Option** key — the button label changes to "Verify Backup." Click it to run verification.
 
@@ -195,7 +179,7 @@ backit monitors whether your backup drive is connected. If the drive is missing 
 - A "Backup Skipped" notification is sent
 - The preflight notification (30 min before) includes a "Skip Tonight" option so you can decide in advance
 
-backit identifies your backup drive by the volume path configured in your CCC task. Make sure the external drive is connected before backup time each day.
+backit identifies your backup drive by the destination folder shown in the Dropbox section. Make sure the external drive is connected before backup time each day.
 
 ---
 
@@ -244,10 +228,6 @@ Learn more at [parachutebackup.com](https://parachutebackup.com).
 - Open System Settings > Notifications > backit and confirm notifications are allowed
 - Notifications only fire when another app with a regular window is active — they won't appear when your screen is locked
 
-**CCC task dropdown is empty**
-- Make sure Carbon Copy Cloner is installed at `/Applications/Carbon Copy Cloner.app`
-- Create at least one task in CCC before launching backit
-
 **Dropbox remote dropdown shows "Install rclone…"**
 - Install rclone: `brew install rclone`
 - Relaunch backit after installing
@@ -258,11 +238,7 @@ Learn more at [parachutebackup.com](https://parachutebackup.com).
 - After adding remotes, click the button — it will open Terminal with `rclone config` automatically
 
 **Backup says "skipped" even though drive is connected**
-- Check that the volume path matches what CCC has configured as the destination
 - The path shown in backit's Dropbox section must be an exact match to the mounted volume
-
-**Progress bar stuck at 0% / "Scanning…"**
-- CCC scans the source and destination before it starts copying. This can take a few minutes for large volumes. This is normal.
 
 **Scheduled headless backup didn't run**
 - Check `~/Library/LaunchAgents/backit.plist` exists

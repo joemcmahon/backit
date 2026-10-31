@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>backit — automated Mac backups</title>
-  <meta name="description" content="backit automates nightly Carbon Copy Cloner disk backups and Dropbox mirroring via rclone on macOS, with scheduling, reminders, and history.">
+  <title>backit — automated Dropbox backups</title>
+  <meta name="description" content="backit mirrors your Dropbox to a local drive every night via rclone on macOS, with scheduling, reminders, and history.">
   <link rel="icon" type="image/png" href="assets/favicon-32.png">
   <link rel="apple-touch-icon" href="assets/icon-180.png">
   <link rel="stylesheet" href="assets/style.css">
@@ -30,10 +30,10 @@
   <header class="hero">
     <div class="wrap">
       <img class="icon" src="assets/icon.png" alt="backit app icon">
-      <h1>Automated Mac backups,<br>on autopilot.</h1>
+      <h1>Your Dropbox, backed up locally,<br>on autopilot.</h1>
       <p class="lede">
-        backit runs a nightly Carbon Copy Cloner backup of your internal drive and mirrors your
-        Dropbox to a local volume via rclone — scheduled, monitored, and out of your way.
+        backit mirrors your Dropbox to a local volume every night via rclone — scheduled,
+        monitored, and out of your way.
       </p>
       <div class="button-row">
         <a class="btn btn-primary" href="https://github.com/joemcmahon/backit">View on GitHub</a>
@@ -55,8 +55,8 @@
         Maestral, a popular open-source Dropbox client, is no longer maintained — leaving people
         who relied on it without a reliable way to keep a local copy of their Dropbox contents.
         backit isn't a sync client. It uses rclone to talk directly to the Dropbox API and mirror
-        your files down to a local backup volume on a schedule, paired with a scheduled Carbon
-        Copy Cloner run of your internal drive — one tool, two dependable local backups.
+        your files down to a local backup volume on a schedule — one dependable local copy of
+        your Dropbox.
       </p>
 
       <div class="callout warn">
@@ -74,12 +74,12 @@
   <section id="features" class="alt">
     <div class="wrap">
       <h2 class="section-title">What it does</h2>
-      <p class="section-lede">Two independent backup jobs, one scheduler.</p>
+      <p class="section-lede">One job, done carefully.</p>
       <div class="grid">
         <div class="card">
           <div class="glyph">🖴</div>
-          <h3>Dual backup jobs</h3>
-          <p>A named Carbon Copy Cloner task backs up your internal drive; rclone mirrors your Dropbox to a local volume.</p>
+          <h3>Dropbox to local drive</h3>
+          <p>rclone mirrors your Dropbox down to a folder on a local backup volume.</p>
         </div>
         <div class="card">
           <div class="glyph">⏱</div>
@@ -88,8 +88,8 @@
         </div>
         <div class="card">
           <div class="glyph">⏻</div>
-          <h3>Enable jobs independently</h3>
-          <p>Only want one of the two backups? Turn either the CCC or Dropbox job off from Settings.</p>
+          <h3>No Dropbox app needed</h3>
+          <p>rclone talks directly to the Dropbox API — no Dropbox desktop client has to be installed or running.</p>
         </div>
         <div class="card">
           <div class="glyph">▤</div>
@@ -99,7 +99,7 @@
         <div class="card">
           <div class="glyph">🕓</div>
           <h3>Run history</h3>
-          <p>Every run — and each job's result within it — is recorded to a local SQLite database.</p>
+          <p>Every run and its result is recorded to a local SQLite database.</p>
         </div>
         <div class="card">
           <div class="glyph">✓</div>
@@ -131,7 +131,6 @@
         <h2 class="section-title" style="text-align: left">Requirements</h2>
         <ul class="plain">
           <li>macOS 26.2 or later</li>
-          <li><a href="https://bombich.com">Carbon Copy Cloner</a> — with a task already configured</li>
           <li><a href="https://rclone.org">rclone</a> — with a Dropbox remote already configured (<code>brew install rclone</code>)</li>
         </ul>
       </div>

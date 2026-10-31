@@ -6,14 +6,12 @@ final class BackupCoordinator: ObservableObject {
     @Published var isRunning = false
     @Published var currentJobType: JobType?
     @Published var currentProgress: JobProgress = .idle
-    @Published var cccProgress: JobProgress = .idle
     @Published var dropboxProgress: JobProgress = .idle
     @Published var lastRunStatus: RunStatus?
     @Published var lastRunDate: Date?
     @Published var lastRcloneSummary: String?
     @Published var currentJobStartDate: Date?
     @Published var rcloneStats: RcloneStats = .idle
-    @Published var cccLastResult: JobResult? = nil
     @Published var dropboxLastResult: JobResult? = nil
     @Published var lastRunDuration: TimeInterval? = nil
 
@@ -67,12 +65,7 @@ final class BackupCoordinator: ObservableObject {
         lastRunDate = run.completedAt
         lastRunStatus = run.status
         let results = (try? db.fetchJobResults(forRun: run.id!)) ?? []
-        for r in results {
-            switch r.jobType {
-            case .disk, .bootable: cccLastResult = r
-            case .dropbox:         dropboxLastResult = r
-            }
-        }
+        dropboxLastResult = results.first { $0.jobType == .dropbox }
         if let end = run.completedAt {
             lastRunDuration = end.timeIntervalSince(run.startedAt)
         }
@@ -80,18 +73,11 @@ final class BackupCoordinator: ObservableObject {
 
     static func defaultFactory(_ settings: BackupSettings) -> [any BackupJob] {
         var jobs: [any BackupJob] = []
-        if settings.diskBackupEnabled && CCCJob.isInstalled() && !settings.diskCCCTaskName.isEmpty {
-            jobs.append(CCCJob(jobType: .disk, taskName: settings.diskCCCTaskName))
-        }
         if settings.dropboxBackupEnabled && DropboxJob.isInstalled() && !settings.dropboxRemoteName.isEmpty {
             jobs.append(DropboxJob(remoteName: settings.dropboxRemoteName,
                                    volumePath: settings.dropboxVolumePath,
                                    verify: settings.verifyAfterSync))
         }
-        // Bootable clone task disabled until a real CCC bootable task is configured
-        // if CCCJob.isInstalled() {
-        //     jobs.append(CCCJob(jobType: .bootable, taskName: settings.bootableCCCTaskName))
-        // }
         return jobs
     }
 
@@ -172,10 +158,7 @@ final class BackupCoordinator: ObservableObject {
         let progressTask = Task { [weak self] in
             for await p in job.progress.values {
                 self?.currentProgress = p
-                switch job.jobType {
-                case .disk, .bootable: self?.cccProgress = p
-                case .dropbox:         self?.dropboxProgress = p
-                }
+                self?.dropboxProgress = p
             }
         }
         let statsTask: Task<Void, Never>?
@@ -205,10 +188,7 @@ final class BackupCoordinator: ObservableObject {
                                durationSeconds: duration)
         result.completedAt = Date()
         try? db.save(&result)
-        switch job.jobType {
-        case .disk, .bootable: cccLastResult = result
-        case .dropbox:         dropboxLastResult = result
-        }
+        dropboxLastResult = result
 
         run.completedAt = Date()
         run.status = fp.status == .done ? .success : .failed
@@ -221,10 +201,8 @@ final class BackupCoordinator: ObservableObject {
         currentJobType = nil
         currentJobStartDate = nil
         currentProgress = .idle
-        switch targetType {
-        case .disk, .bootable: cccProgress = .idle
-        case .dropbox:         dropboxProgress = .idle; rcloneStats = .idle
-        }
+        dropboxProgress = .idle
+        rcloneStats = .idle
         runningTask = nil
     }
 
@@ -257,16 +235,6 @@ final class BackupCoordinator: ObservableObject {
         var anyFailed = false
         var anySucceeded = false
 
-        // Mark all jobs after the first as "waiting" so the UI doesn't show blank progress
-        let waiting = JobProgress(fraction: 0, bytesTransferred: 0, bytesTotal: 0,
-                                  transferRate: "Waiting…", status: .idle)
-        for job in jobs.dropFirst() {
-            switch job.jobType {
-            case .disk, .bootable: cccProgress = waiting
-            case .dropbox:         dropboxProgress = waiting
-            }
-        }
-
         for job in jobs {
             guard !Task.isCancelled else { break }
             currentJobType = job.jobType
@@ -277,10 +245,7 @@ final class BackupCoordinator: ObservableObject {
             let progressTask = Task { [weak self] in
                 for await p in job.progress.values {
                     self?.currentProgress = p
-                    switch job.jobType {
-                    case .disk, .bootable: self?.cccProgress = p
-                    case .dropbox:         self?.dropboxProgress = p
-                    }
+                    self?.dropboxProgress = p
                 }
             }
             let statsTask: Task<Void, Never>?
@@ -316,10 +281,7 @@ final class BackupCoordinator: ObservableObject {
                                    durationSeconds: duration)
             result.completedAt = Date()
             try? db.save(&result)
-            switch job.jobType {
-            case .disk, .bootable: cccLastResult = result
-            case .dropbox:         dropboxLastResult = result
-            }
+            dropboxLastResult = result
 
             if fp.status == .done { anySucceeded = true } else { anyFailed = true }
         }
@@ -344,7 +306,6 @@ final class BackupCoordinator: ObservableObject {
         isRunning = false
         currentJobType = nil
         currentJobStartDate = nil
-        cccProgress = .idle
         dropboxProgress = .idle
         currentProgress = .idle
         rcloneStats = .idle

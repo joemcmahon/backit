@@ -1,6 +1,6 @@
 # backit
 
-A macOS app that automates daily incremental backups to a local drive (via Carbon Copy Cloner) and Dropbox (via rclone). It runs as a normal windowed app when launched interactively, and headless (no window, no Dock icon) when launchd triggers it at your scheduled backup time. Handles scheduling, reminders, progress monitoring, and history.
+A macOS app that automates a daily backup of your Dropbox to a local drive, via rclone. It runs as a normal windowed app when launched interactively, and headless (no window, no Dock icon) when launchd triggers it at your scheduled backup time. Handles scheduling, reminders, progress monitoring, and history.
 
 > **⚠️ Use at your own risk.** backit is a personal project, provided free with no warranty and no guarantee of support (see [LICENSE](LICENSE)). It is not a substitute for a tested, independent backup strategy — verify your restores, keep more than one backup method, and don't rely on this as your only copy of anything important. The author is not liable for data loss, missed backups, or any other damages arising from its use.
 
@@ -19,13 +19,14 @@ A macOS app that automates daily incremental backups to a local drive (via Carbo
 
 Maestral, a popular open-source Dropbox client, is no longer maintained — leaving people who relied on it without a reliable way to keep a local copy of their Dropbox contents in sync.
 
-backit doesn't try to be a Dropbox sync client. Instead, it uses rclone to talk directly to the Dropbox API and mirror your Dropbox contents down to a local backup volume on a schedule — no Dropbox desktop app (official or third-party) needs to be installed or running. Paired with a scheduled Carbon Copy Cloner run of your internal drive, that gives you a periodic, dependable local backup of both your Mac and your Dropbox files with one tool.
+backit doesn't try to be a Dropbox sync client. Instead, it uses rclone to talk directly to the Dropbox API and mirror your Dropbox contents down to a local backup volume on a schedule — no Dropbox desktop app (official or third-party) needs to be installed or running. That gives you a periodic, dependable local copy of your Dropbox files.
+
+> **Backing up your Mac itself?** Earlier versions of backit also ran a Carbon Copy Cloner task. CCC has its own scheduler, so backit no longer does that — schedule your CCC task in CCC.
 
 > **⚠️ The local Dropbox copy is a backup, not your Dropbox folder.** rclone copies one-way, from Dropbox down to the local volume — it is not a live, two-way synced folder like Dropbox's own app or Maestral provide. **Don't create, edit, or delete files directly in the local backup copy.** Nothing you do there is sent back up to Dropbox, and anything you change will be silently overwritten or deleted the next time backit runs, to match whatever is currently in Dropbox. Make your real edits in Dropbox itself (web, mobile, or a sync client) — this backup volume exists purely so you have a recent offline copy if Dropbox, your account, or your original files are ever lost.
 
 ## What it does
 
-- Runs a named CCC task to back up your internal drive
 - Syncs your Dropbox remote to a local backup volume via rclone
 - Sends smart notifications before backups (reminder → final check → backup)
 - Skips silently if your backup drive isn't connected, then notifies you
@@ -35,10 +36,9 @@ backit doesn't try to be a Dropbox sync client. Instead, it uses rclone to talk 
 ## Requirements
 
 - macOS 26.2 or later
-- [Carbon Copy Cloner](https://bombich.com) — with a task already configured
 - [rclone](https://rclone.org) — with a Dropbox remote already configured (`brew install rclone`)
 
-Both tools must be configured before backit can run backups. backit provides the scheduling and orchestration; CCC and rclone do the actual backup work.
+rclone must be configured before backit can run backups. backit provides the scheduling and monitoring; rclone does the actual backup work.
 
 ## Installation
 
@@ -62,7 +62,7 @@ Click the gear icon (⚙️) at the bottom right of the main window to open the 
 
 The computed notification times are shown live at the bottom of the Schedule section as you adjust intervals.
 
-Select your CCC task and rclone remote from the dropdown menus in the main window.
+Select your rclone remote from the dropdown menu in the main window, and pick the destination folder on your backup volume.
 
 ## Backup schedule
 
@@ -72,7 +72,7 @@ With default settings and an 11 PM backup time:
 |------|-------|
 | 8:00 PM | Reminder notification ("Backup Tonight") |
 | 10:30 PM | Final check — alerts if drive still not connected |
-| 11:00 PM | Backup runs (CCC first, then Dropbox) |
+| 11:00 PM | Backup runs (Dropbox sync) |
 
 All three times adjust automatically when you change the backup time or interval settings.
 

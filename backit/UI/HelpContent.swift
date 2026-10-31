@@ -99,13 +99,10 @@ enum HelpContent {
     <p class="subtitle">Automated daily backups for macOS</p>
 
     <h2>Overview</h2>
-    <p>backit is an application that automates daily backups of your system and your Dropbox. Just run it, set the backup time you prefer, have the disk connected, and it will quietly keep backing up your files until you stop it.</p>
+    <p>backit is an application that automates a daily backup of your Dropbox to a local drive. Just run it, set the backup time you prefer, have the disk connected, and it will quietly keep backing up your files until you stop it.</p>
     <p>It runs quietly in the background, notifies you before backups, and shows live progress while they run.</p>
-    <p>backit runs two backup tools that you configure separately:</p>
-    <ul>
-      <li><strong>Carbon Copy Cloner (CCC)</strong> — handles the backup of your internal Mac drive to an external volume</li>
-      <li><strong>rclone</strong> — syncs your Dropbox cloud storage to a local folder on a backup volume</li>
-    </ul>
+    <p>backit uses <strong>rclone</strong> to copy your Dropbox cloud storage down to a folder on a local backup volume. That's the only thing it does.</p>
+    <p><strong>Backing up your Mac's internal drive?</strong> Earlier versions of backit could also run a Carbon Copy Cloner task. CCC has its own scheduler, so that job has been removed — schedule your CCC task in CCC itself.</p>
 
     <hr>
 
@@ -113,18 +110,11 @@ enum HelpContent {
     <h3>Before you launch backit</h3>
     <ol>
       <li>
-        <p><strong>Install Carbon Copy Cloner</strong> from <a href="https://bombich.com">bombich.com</a> and create at least one backup task.</p>
-        <ul>
-          <li>Open CCC, click the <code>+</code> button, name your task (e.g., "My Backup"), choose a source and destination, and save.</li>
-          <li>You'll enter this task name in backit's settings to configure the hard disk backup.</li>
-        </ul>
-      </li>
-      <li>
         <p><strong>Install rclone</strong> via Homebrew:</p>
         <pre>brew install rclone</pre>
         <p><strong>Dropbox remote</strong> — run <code>rclone config</code> and follow the wizard to add a Dropbox remote. The remote name you give it (e.g., <code>my-dropbox</code>) is what you'll select in backit.</p>
       </li>
-      <li><strong>Connect your backup drive</strong> — backit needs the destination volume or volumes to be mounted at backup time. It will alert you if the disk or disks are missing.</li>
+      <li><strong>Connect your backup drive</strong> — backit needs the destination volume to be mounted at backup time. It will alert you if the disk is missing.</li>
     </ol>
 
     <h3>First launch</h3>
@@ -139,16 +129,6 @@ enum HelpContent {
 
     <h2>The Main Window</h2>
     <p>Click on backit in the Dock to bring its window to the front; if you've closed it, just click on the Dock icon to bring it back.</p>
-
-    <h3>Internal Disk (CCC) section</h3>
-    <p>Shows the status of your Carbon Copy Cloner backup:</p>
-    <ul>
-      <li><strong>Source dropdown</strong> — select the CCC task to run (automatically populated from CCC's saved tasks)</li>
-      <li><strong>Destination button</strong> — opens CCC so you can view or edit the task</li>
-      <li><strong>Progress bar</strong> — fills as the backup progresses (0–100%)</li>
-      <li><strong>Elapsed time</strong> — how long the backup has been running</li>
-    </ul>
-    <p>During the scan phase at the start of a CCC backup, the progress bar shows "Scanning…" until CCC determines what needs to be copied. There's usually some time while CCC figures out how long the backup will take before the progress bar starts updating — you can always switch over to CCC and check progress in its window.</p>
 
     <h3>Dropbox (rclone) section</h3>
     <p>Shows the status of your rclone Dropbox sync:</p>
@@ -198,7 +178,7 @@ enum HelpContent {
       <tr><th>Time</th><th>What happens</th></tr>
       <tr><td>8:00 PM</td><td><strong>Reminder</strong> notification — "Backup Tonight at 11:00 PM"</td></tr>
       <tr><td>10:30 PM</td><td><strong>Final check</strong> notification — alerts if your backup drive is still not connected</td></tr>
-      <tr><td>11:00 PM</td><td><strong>Backup runs</strong> — CCC first, then Dropbox</td></tr>
+      <tr><td>11:00 PM</td><td><strong>Backup runs</strong> — Dropbox sync</td></tr>
     </table>
     <p>The reminder and final check times adjust automatically when you change the backup time or interval settings.</p>
 
@@ -240,7 +220,7 @@ enum HelpContent {
     <hr>
 
     <h2>Running a Manual Backup</h2>
-    <p>Click <strong>Run Backup</strong> at any time to start a backup immediately. The backup runs the same sequence as a scheduled backup: CCC first, then Dropbox.</p>
+    <p>Click <strong>Run Backup</strong> at any time to start a backup immediately. The backup runs the same Dropbox sync as a scheduled backup.</p>
     <p>To run only the verification step (rclone check, no sync), hold the <strong>Option</strong> key — the button label changes to "Verify Backup." Click it to run verification.</p>
 
     <hr>
@@ -275,7 +255,7 @@ enum HelpContent {
       <li>A "Backup Skipped" notification is sent</li>
       <li>The preflight notification (30 min before) includes a "Skip Tonight" option so you can decide in advance</li>
     </ul>
-    <p>backit identifies your backup drive by the volume path configured in your CCC task. Make sure the external drive is connected before backup time each day.</p>
+    <p>backit identifies your backup drive by the destination folder shown in the Dropbox section. Make sure the external drive is connected before backup time each day.</p>
 
     <hr>
 
@@ -314,11 +294,6 @@ enum HelpContent {
       <li>Open System Settings &gt; Notifications &gt; backit and confirm notifications are allowed</li>
       <li>Notifications only fire when another app with a regular window is active — they won't appear when your screen is locked</li>
     </ul>
-    <h3>CCC task dropdown is empty</h3>
-    <ul>
-      <li>Make sure Carbon Copy Cloner is installed at <code>/Applications/Carbon Copy Cloner.app</code></li>
-      <li>Create at least one task in CCC before launching backit</li>
-    </ul>
     <h3>Remote dropdown shows "Install rclone…"</h3>
     <ul>
       <li>Install rclone: <code>brew install rclone</code></li>
@@ -332,12 +307,7 @@ enum HelpContent {
     </ul>
     <h3>Backup says "skipped" even though drive is connected</h3>
     <ul>
-      <li>Check that the volume path matches what CCC has configured as the destination</li>
       <li>The path shown in backit's Dropbox section must be an exact match to the mounted volume</li>
-    </ul>
-    <h3>Progress bar stuck at 0% / "Scanning…"</h3>
-    <ul>
-      <li>CCC scans source and destination before copying. This can take a few minutes for large volumes. This is normal.</li>
     </ul>
     <h3>Scheduled headless backup didn't run</h3>
     <ul>

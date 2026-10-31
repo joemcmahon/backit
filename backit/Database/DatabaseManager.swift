@@ -15,8 +15,11 @@ enum DatabaseError: Error {
 final class DatabaseManager {
     private var db: OpaquePointer?
 
-    init(inMemory: Bool = false) throws {
-        let path = inMemory ? ":memory:" : try Self.dbPath()
+    convenience init(inMemory: Bool = false) throws {
+        try self.init(path: inMemory ? ":memory:" : try Self.dbPath())
+    }
+
+    init(path: String) throws {
         guard sqlite3_open(path, &db) == SQLITE_OK else {
             let msg = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
             throw DatabaseError.open(msg)
@@ -72,6 +75,22 @@ final class DatabaseManager {
         // Additive migration: add completedAt to jobResult if not present.
         // Returns SQLITE_ERROR ("duplicate column name") on re-run — that's expected; ignore it.
         sqlite3_exec(db, "ALTER TABLE jobResult ADD COLUMN completedAt REAL;", nil, nil, nil)
+        try purgeLegacyCCCHistory()
+    }
+
+    /// backit used to run Carbon Copy Cloner jobs too. Drop that history: runs that were
+    /// CCC-only go entirely, mixed runs keep their Dropbox result. Runs with no results
+    /// (possibly in progress in another process) are left alone.
+    private func purgeLegacyCCCHistory() throws {
+        let sql = """
+        DELETE FROM backupRun
+        WHERE id IN (SELECT runId FROM jobResult WHERE jobType != 'dropbox')
+          AND id NOT IN (SELECT runId FROM jobResult WHERE jobType = 'dropbox');
+        DELETE FROM jobResult WHERE jobType != 'dropbox';
+        """
+        guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+            throw DatabaseError.exec(String(cString: sqlite3_errmsg(db)))
+        }
     }
 
     // MARK: - Save
@@ -214,7 +233,7 @@ final class DatabaseManager {
         while sqlite3_step(stmt) == SQLITE_ROW {
             let id = sqlite3_column_int64(stmt, 0)
             let rId = sqlite3_column_int64(stmt, 1)
-            let jobType = JobType(rawValue: String(cString: sqlite3_column_text(stmt, 2))) ?? .disk
+            guard let jobType = JobType(rawValue: String(cString: sqlite3_column_text(stmt, 2))) else { continue }
             let status = JobStatus(rawValue: String(cString: sqlite3_column_text(stmt, 3))) ?? .failed
             let bytesTransferred = sqlite3_column_int64(stmt, 4)
             let bytesTotal = sqlite3_column_int64(stmt, 5)

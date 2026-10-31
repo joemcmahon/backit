@@ -13,10 +13,6 @@ final class BackupSettingsTests: XCTestCase {
         XCTAssertEqual(sut.historyLimit, 3)
     }
 
-    func testDefaultDiskCCCTaskName() {
-        XCTAssertEqual(sut.diskCCCTaskName, "\(NSUserName()) Backup")
-    }
-
     func testDefaultDropboxRemoteName() {
         XCTAssertEqual(sut.dropboxRemoteName, "\(NSUserName())-dropbox")
     }
@@ -35,21 +31,8 @@ final class BackupSettingsTests: XCTestCase {
         XCTAssertEqual(sut.storedMachineUUID, "")
     }
 
-    func testDiskBackupEnabledDefaultsToTrue() {
-        XCTAssertTrue(sut.diskBackupEnabled)
-    }
-
     func testDropboxBackupEnabledDefaultsToTrue() {
         XCTAssertTrue(sut.dropboxBackupEnabled)
-    }
-
-    func testDiskBackupEnabledPersists() {
-        let suiteName = UUID().uuidString
-        let defaults = UserDefaults(suiteName: suiteName)!
-        sut = BackupSettings(userDefaults: defaults)
-        sut.diskBackupEnabled = false
-        let reloaded = BackupSettings(userDefaults: defaults)
-        XCTAssertFalse(reloaded.diskBackupEnabled)
     }
 
     func testDropboxBackupEnabledPersists() {

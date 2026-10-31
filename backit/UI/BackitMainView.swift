@@ -6,7 +6,6 @@ struct BackitMainView: View {
     @ObservedObject var settings: BackupSettings
     let db: DatabaseManager
 
-    @State private var cccTasks: [CCCTaskEntry] = []
     @State private var rcloneRemotes: [String] = []
     @State private var rcloneInstalled = false
     @State private var showScheduleSheet = false
@@ -16,21 +15,6 @@ struct BackitMainView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // CCC section
-            JobSectionView(
-                title: "Internal disk (CCC)",
-                systemImage: "externaldrive.fill",
-                sourcePicker: { AnyView(cccTaskPicker) },
-                destPicker: { AnyView(cccVolumePicker) },
-                progress: coordinator.cccProgress,
-                startDate: coordinator.currentJobType == .disk ? coordinator.currentJobStartDate : nil,
-                isRunning: coordinator.isRunning,
-                onSingleRun: { coordinator.runSingleJob(.disk) },
-                lastResult: coordinator.cccLastResult
-            )
-
-            Divider().padding(.horizontal)
-
             // Dropbox section
             RcloneStatusView(
                 title: "Dropbox (rclone)",
@@ -131,27 +115,6 @@ struct BackitMainView: View {
         }
     }
 
-    // MARK: - CCC pickers
-
-    private var cccTaskPicker: some View {
-        Menu(settings.diskCCCTaskName.isEmpty ? "Select CCC Task…" : settings.diskCCCTaskName) {
-            if cccTasks.isEmpty {
-                Text("No tasks found").foregroundColor(.secondary)
-            }
-            ForEach(cccTasks) { task in
-                Button(task.name) { settings.diskCCCTaskName = task.name }
-            }
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var cccVolumePicker: some View {
-        Button("Configure in CCC…") {
-            NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Carbon Copy Cloner.app"))
-        }
-        .frame(maxWidth: .infinity)
-    }
-
     // MARK: - rclone pickers
 
     @ViewBuilder
@@ -184,7 +147,6 @@ struct BackitMainView: View {
     // MARK: - Helpers
 
     private func loadRemoteData() async {
-        cccTasks = await CCCTaskLoader.load()
         rcloneInstalled = DropboxJob.isInstalled()
         rcloneRemotes = await RcloneRemoteLoader.load()
     }
@@ -208,108 +170,6 @@ struct BackitMainView: View {
         let escaped = command.replacingOccurrences(of: "\"", with: "\\\"")
         let src = "tell application \"Terminal\"\n  do script \"\(escaped)\"\n  activate\nend tell"
         NSAppleScript(source: src)?.executeAndReturnError(nil)
-    }
-}
-
-// MARK: - Job section
-
-struct JobSectionView: View {
-    let title: String
-    let systemImage: String
-    let sourcePicker: () -> AnyView
-    let destPicker: () -> AnyView
-    let progress: JobProgress
-    var startDate: Date? = nil
-    var isRunning: Bool = false
-    var onSingleRun: (() -> Void)? = nil
-    var lastResult: JobResult? = nil
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: systemImage)
-                .font(.headline)
-
-            HStack(spacing: 8) {
-                sourcePicker()
-                destPicker()
-            }
-
-            HStack(spacing: 8) {
-                ProgressView(value: progress.fraction)
-                    .frame(maxWidth: .infinity)
-                Text(progressLabel)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .frame(width: 48, alignment: .trailing)
-            }
-
-            HStack {
-                if progress.status == .running, !progress.transferRate.isEmpty {
-                    Text(progress.transferRate)
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-                if progress.status == .running, let startDate {
-                    TimelineView(.periodic(from: startDate, by: 1.0)) { context in
-                        Text(elapsed(from: startDate, to: context.date))
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .monospacedDigit()
-                    }
-                } else if let result = lastResult, let completedAt = result.completedAt {
-                    Text(completionSummary(result: result, completedAt: completedAt))
-                        .font(.caption2)
-                        .foregroundColor(result.status == .done ? .green : .red)
-                        .monospacedDigit()
-                } else {
-                    Text("--:--")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .monospacedDigit()
-                }
-            }
-        }
-        .padding()
-        .contextMenu {
-            if let onSingleRun {
-                Button("Run this backup now") { onSingleRun() }
-                    .disabled(isRunning)
-            }
-        }
-    }
-
-    private var progressLabel: String {
-        switch progress.status {
-        case .idle: return progress.transferRate.isEmpty ? "—" : progress.transferRate
-        case .running: return "\(Int(progress.fraction * 100))%"
-        case .done: return "✓"
-        case .failed: return "✗"
-        case .skipped: return "•"
-        }
-    }
-
-    private func elapsed(from start: Date, to now: Date) -> String {
-        let s = Int(now.timeIntervalSince(start))
-        let h = s / 3600
-        let m = (s % 3600) / 60
-        let sec = s % 60
-        if h > 0 { return String(format: "%d:%02d:%02d", h, m, sec) }
-        return String(format: "%d:%02d", m, sec)
-    }
-
-    private func completionSummary(result: JobResult, completedAt: Date) -> String {
-        let fmt = DateFormatter()
-        fmt.dateStyle = .short
-        fmt.timeStyle = .medium
-        let label = result.status == .done ? "completed" : "failed"
-        return "\(label) \(fmt.string(from: completedAt)) · \(elapsedFromSeconds(result.durationSeconds))"
-    }
-
-    private func elapsedFromSeconds(_ total: Int) -> String {
-        let h = total / 3600; let m = (total % 3600) / 60; let s = total % 60
-        if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
-        return String(format: "%d:%02d", m, s)
     }
 }
 
@@ -341,7 +201,6 @@ struct ScheduleSheetView: View {
     var body: some View {
         Form {
             Section("Jobs") {
-                Toggle("Back up internal disk (CCC)", isOn: $settings.diskBackupEnabled)
                 Toggle("Back up Dropbox (rclone)", isOn: $settings.dropboxBackupEnabled)
             }
             Section("Schedule") {
@@ -635,11 +494,4 @@ struct VerifyResultsSheet: View {
         .padding()
         .frame(width: 500)
     }
-}
-
-// MARK: - Data models
-
-struct CCCTaskEntry: Identifiable {
-    let id: String   // UUID from ccc --uuids
-    let name: String
 }
