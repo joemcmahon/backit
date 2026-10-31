@@ -67,6 +67,16 @@ final class LaunchAgentManager {
         return args.first
     }
 
+    /// True when this copy of the app shouldn't own the nightly schedule: a test host,
+    /// or a build still sitting in Xcode's build products. Otherwise running tests or
+    /// Xcode's Run would quietly repoint the LaunchAgent away from /Applications.
+    static func isTransientBuild(executablePath: String? = Bundle.main.executablePath,
+                                 environment: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
+        if environment["XCTestConfigurationFilePath"] != nil { return true }
+        guard let path = executablePath else { return false }
+        return path.contains("/DerivedData/") || path.contains("/Build/Products/")
+    }
+
     var needsInstall: Bool {
         !isInstalled
             || installedVersion != Self.currentPlistVersion

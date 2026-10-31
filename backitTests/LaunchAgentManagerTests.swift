@@ -102,4 +102,25 @@ final class LaunchAgentManagerTests: XCTestCase {
         let args = plist["ProgramArguments"] as? [String] ?? []
         XCTAssertTrue(args.contains("--headless"), "ProgramArguments should contain --headless")
     }
+
+    func testTransientBuildUnderXCTest() {
+        XCTAssertTrue(LaunchAgentManager.isTransientBuild(
+            executablePath: "/Applications/backit.app/Contents/MacOS/backit",
+            environment: ["XCTestConfigurationFilePath": "/tmp/x.xctestconfiguration"]))
+    }
+
+    func testTransientBuildInDerivedData() {
+        let path = "/Users/me/Library/Developer/Xcode/DerivedData/backit-abc/Build/Products/Debug/backit.app/Contents/MacOS/backit"
+        XCTAssertTrue(LaunchAgentManager.isTransientBuild(executablePath: path, environment: [:]))
+    }
+
+    func testTransientBuildInCustomBuildProducts() {
+        let path = "/tmp/dd/Build/Products/Release/backit.app/Contents/MacOS/backit"
+        XCTAssertTrue(LaunchAgentManager.isTransientBuild(executablePath: path, environment: [:]))
+    }
+
+    func testInstalledAppIsNotTransient() {
+        XCTAssertFalse(LaunchAgentManager.isTransientBuild(
+            executablePath: "/Applications/backit.app/Contents/MacOS/backit", environment: [:]))
+    }
 }

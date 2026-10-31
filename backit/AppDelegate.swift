@@ -50,14 +50,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
         showMainWindow()
 
-        if launchAgent.needsInstall { try? launchAgent.install(backupTime: settings.backupTime) }
+        if LaunchAgentManager.isTransientBuild() {
+            NSLog("backit: development/test build — leaving the LaunchAgent alone")
+        } else {
+            if launchAgent.needsInstall { try? launchAgent.install(backupTime: settings.backupTime) }
 
-        settings.$backupTime
-            .dropFirst()
-            .sink { [weak self] newTime in
-                try? self?.launchAgentManager?.install(backupTime: newTime)
-            }
-            .store(in: &cancellables)
+            settings.$backupTime
+                .dropFirst()
+                .sink { [weak self] newTime in
+                    try? self?.launchAgentManager?.install(backupTime: newTime)
+                }
+                .store(in: &cancellables)
+        }
 
         // If launched by launchd at backup time, ScheduleManager targets tomorrow.
         // Catch up if backup time was within the last 5 minutes and no backup has run today.

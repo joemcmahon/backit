@@ -54,9 +54,10 @@ type: implementation_strategy
 from the installed one. Running tests or Xcode's Run therefore repoints the nightly backup
 at a DerivedData build. This happened on Oct 30: the Variant-NoSanitizers Debug build from
 18:31 ran that night instead of the latest code.
-**Proposed fix (not done; offered to the user):** skip the LaunchAgent install when running
-under XCTest (`XCTestConfigurationFilePath` env var) or from a DerivedData path.
-**Workaround until it's fixed:** after running tests, launch `/Applications/backit.app` once.
+**Fixed (2026-10-31):** `LaunchAgentManager.isTransientBuild()` is true when running under
+XCTest (`XCTestConfigurationFilePath` env var) or from a `/DerivedData/` or `/Build/Products/`
+path. In that case AppDelegate leaves the LaunchAgent alone. Tests pass, and after a full
+test run the plist still points at /Applications.
 
 ## Next steps
 
@@ -64,11 +65,10 @@ under XCTest (`XCTestConfigurationFilePath` env var) or from a DerivedData path.
    `~/Library/Application Support/backit/backit.db`. Expect it to finish (no 24h hang).
    It should show a green check, or an orange ⚠️ with a count if anything was missed.
    Note that /tmp is cleared on reboot, so older logs will be gone.
-2. Decide on the LaunchAgent/XCTest fix above.
-3. Not yet done: tag `v1.2.0`. Pushing a `v*` tag starts the signed/notarized release, so
+2. Not yet done: tag `v1.2.0`. Pushing a `v*` tag starts the signed/notarized release, so
    ask first. The site's install section still says "No signed releases yet", which is out
    of date.
-4. Known leftover (deliberately conservative): a run with rclone errors that don't name a
+3. Known leftover (deliberately conservative): a run with rclone errors that don't name a
    file is still marked failed, even if the retries fixed everything.
 
 ## Useful commands
