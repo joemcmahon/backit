@@ -7,3 +7,7 @@ DerivedData/
 backit/backit.app/
 .cave/worktrees/
 *.profraw
+
+# Agent handoffs stay local in public repos
+docs/HANDOFF.md
+docs/archive/
